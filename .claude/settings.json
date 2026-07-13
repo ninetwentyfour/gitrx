@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; case \"$f\" in *.rs) \"$HOME/.cargo/bin/rustfmt\" --edition 2021 \"$f\";; *.ts|*.tsx|*.js|*.jsx|*.json|*.md|*.css) bun x oxfmt \"$f\";; esac; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Formatting edited file"
+          }
+        ]
+      }
+    ]
+  }
+}
