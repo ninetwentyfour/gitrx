@@ -1,9 +1,9 @@
 ---
 name: tsconfig
-description: 'TypeScript config conventions for this monorepo: the two-base layering, the eight leaf tiers, and the never-redeclare list. Use when adding a package, editing any tsconfig.json, picking a tier for a new app, or debugging module resolution.'
+description: "TypeScript config conventions for this monorepo: the two-base layering, the eight leaf tiers, and the never-redeclare list. Use when adding a package, editing any tsconfig.json, picking a tier for a new app, or debugging module resolution."
 metadata:
   author: epicenter
-  version: '1.0'
+  version: "1.0"
 ---
 
 # tsconfig conventions
@@ -43,16 +43,16 @@ and `bundler` resolution already reads package.json `imports`/`exports`.
 
 Pick the tier, copy the shape, change nothing else.
 
-| Tier | `extends` | Leaf adds |
-| --- | --- | --- |
-| Bun library | `"../../tsconfig.base.json"` | `types:["bun"]`, `noUnusedLocals`, `noUnusedParameters` |
-| Node library | `"../../tsconfig.base.json"` | `types:["node"]`, `noUnusedLocals`, `noUnusedParameters` |
-| Svelte library | `"../../tsconfig.dom.json"` | `types:["bun"]`, `noUnusedLocals`, `noUnusedParameters` |
-| SvelteKit app | `["../../tsconfig.base.json", "./.svelte-kit/tsconfig.json"]` | `checkJs:true`, `types:["bun"]` |
-| Cloudflare Worker | `"../../tsconfig.base.json"` | `jsx`, `jsxImportSource`, `types`, `include` |
-| Bun app | `"../../tsconfig.base.json"` | `types:["bun"]`, `include` |
-| Astro app | `["../../tsconfig.base.json", "astro/tsconfigs/strict"]` | astro `include`/`exclude` |
-| WXT extension | `["../../tsconfig.dom.json", "./.wxt/tsconfig.json"]` | `customConditions`, `paths`, `include` |
+| Tier              | `extends`                                                     | Leaf adds                                                |
+| ----------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| Bun library       | `"../../tsconfig.base.json"`                                  | `types:["bun"]`, `noUnusedLocals`, `noUnusedParameters`  |
+| Node library      | `"../../tsconfig.base.json"`                                  | `types:["node"]`, `noUnusedLocals`, `noUnusedParameters` |
+| Svelte library    | `"../../tsconfig.dom.json"`                                   | `types:["bun"]`, `noUnusedLocals`, `noUnusedParameters`  |
+| SvelteKit app     | `["../../tsconfig.base.json", "./.svelte-kit/tsconfig.json"]` | `checkJs:true`, `types:["bun"]`                          |
+| Cloudflare Worker | `"../../tsconfig.base.json"`                                  | `jsx`, `jsxImportSource`, `types`, `include`             |
+| Bun app           | `"../../tsconfig.base.json"`                                  | `types:["bun"]`, `include`                               |
+| Astro app         | `["../../tsconfig.base.json", "astro/tsconfigs/strict"]`      | astro `include`/`exclude`                                |
+| WXT extension     | `["../../tsconfig.dom.json", "./.wxt/tsconfig.json"]`         | `customConditions`, `paths`, `include`                   |
 
 A generated config (`./.svelte-kit/tsconfig.json`, `./.wxt/tsconfig.json`) goes
 **last** in the array so its `lib`/`module` win where they must. Never hand-edit
@@ -86,17 +86,17 @@ The two canonical library shapes in full:
 
 Putting any of these in a leaf is dead weight. Delete on sight.
 
-| Do not write in a leaf | Why |
-| --- | --- |
-| `module: "preserve"` | already in `tsconfig.base.json` |
-| `moduleResolution`, `target`, `noEmit`, `strict`, `isolatedModules` | already in the base |
-| `lib: ["ESNext"]` | the base default; use `tsconfig.dom.json` if you need DOM |
-| `noPropertyAccessFromIndexSignature: false` | that is already the TS default |
-| `useDefineForClassFields: true` | default when `target` >= ES2022 |
-| `forceConsistentCasingInFileNames` | default `true` since TS 5.0 |
-| `resolvePackageJsonExports` | default `true` under `moduleResolution: bundler` |
-| `sourceMap` | no-op under `noEmit` |
-| single-element `extends` array | use the string form: `"extends": "../../tsconfig.base.json"` |
+| Do not write in a leaf                                              | Why                                                          |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `module: "preserve"`                                                | already in `tsconfig.base.json`                              |
+| `moduleResolution`, `target`, `noEmit`, `strict`, `isolatedModules` | already in the base                                          |
+| `lib: ["ESNext"]`                                                   | the base default; use `tsconfig.dom.json` if you need DOM    |
+| `noPropertyAccessFromIndexSignature: false`                         | that is already the TS default                               |
+| `useDefineForClassFields: true`                                     | default when `target` >= ES2022                              |
+| `forceConsistentCasingInFileNames`                                  | default `true` since TS 5.0                                  |
+| `resolvePackageJsonExports`                                         | default `true` under `moduleResolution: bundler`             |
+| `sourceMap`                                                         | no-op under `noEmit`                                         |
+| single-element `extends` array                                      | use the string form: `"extends": "../../tsconfig.base.json"` |
 
 ## `types` is opt-in, on purpose
 
@@ -108,7 +108,7 @@ without `@types/bun` installed would then fail with `Cannot find type definition
 ## `include` rules
 
 - TypeScript does **not** merge `include` across `extends`. A leaf `include`
-  fully *replaces* the inherited one. For SvelteKit apps this means: do not set
+  fully _replaces_ the inherited one. For SvelteKit apps this means: do not set
   your own `include`, or you drop the generated `ambient.d.ts`/`$types` globs.
 - Only set `include` when you must narrow scope for a real reason; comment why.
 

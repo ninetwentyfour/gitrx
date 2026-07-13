@@ -1,6 +1,7 @@
 # Factory Patterns
 
 ## When to Read This
+
 Read this when designing or refactoring factory functions and closure-managed state.
 
 # Parameter Destructuring for Factory Functions
@@ -14,8 +15,8 @@ When writing factory functions that take options objects, destructure directly i
 ```typescript
 // DON'T: Extra line of ceremony
 function createSomething(opts: { foo: string; bar?: number }) {
-	const { foo, bar = 10 } = opts; // Unnecessary extra line
-	return { foo, bar };
+  const { foo, bar = 10 } = opts; // Unnecessary extra line
+  return { foo, bar };
 }
 ```
 
@@ -24,7 +25,7 @@ function createSomething(opts: { foo: string; bar?: number }) {
 ```typescript
 // DO: Destructure directly in parameters
 function createSomething({ foo, bar = 10 }: { foo: string; bar?: number }) {
-	return { foo, bar };
+  return { foo, bar };
 }
 ```
 
@@ -116,9 +117,15 @@ function createBackoff() {
   let sleeper: { promise: Promise<void>; wake(): void } | null = null;
 
   return {
-    async sleep() { /* compute delay, create sleeper, await, cleanup */ },
-    wake() { sleeper?.wake(); },
-    reset() { retries = 0; },
+    async sleep() {
+      /* compute delay, create sleeper, await, cleanup */
+    },
+    wake() {
+      sleeper?.wake();
+    },
+    reset() {
+      retries = 0;
+    },
   };
 }
 ```
@@ -130,27 +137,27 @@ function createProvider(config) {
   const backoff = createBackoff();
 
   async function runLoop() {
-    await backoff.sleep();     // was 5 duplicated lines
+    await backoff.sleep(); // was 5 duplicated lines
   }
 
   function handleOnline() {
-    backoff.wake();            // was reconnectSleeper?.wake()
+    backoff.wake(); // was reconnectSleeper?.wake()
   }
 
   function handleSuccess() {
-    backoff.reset();           // was retries = 0
+    backoff.reset(); // was retries = 0
   }
 }
 ```
 
 ## When to Extract
 
-| Signal | Action |
-|---|---|
-| Two+ `let`s always set in the same function | Likely one concept |
-| Resetting one requires resetting the others | Definitely one concept |
+| Signal                                      | Action                         |
+| ------------------------------------------- | ------------------------------ |
+| Two+ `let`s always set in the same function | Likely one concept             |
+| Resetting one requires resetting the others | Definitely one concept         |
 | An external caller reaches into one of them | The concept needs a public API |
-| The same multi-line ceremony appears twice | Extract and name it |
+| The same multi-line ceremony appears twice  | Extract and name it            |
 
 ## When NOT to Extract
 

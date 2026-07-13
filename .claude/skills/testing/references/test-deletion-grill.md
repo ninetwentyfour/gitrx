@@ -76,7 +76,7 @@ so the runtime check earns nothing over the compiler.
 
 ```typescript
 const value: string = getTypedString();
-expect(typeof value).toBe('string');
+expect(typeof value).toBe("string");
 ```
 
 This does not apply to runtime validation at an untyped boundary:
@@ -90,8 +90,8 @@ mock returned what the mock was told to return. No real behavior is
 under test.
 
 ```typescript
-const client = { fetch: mock(() => 'ok') };
-expect(run(client)).toBe('ok');
+const client = { fetch: mock(() => "ok") };
+expect(run(client)).toBe("ok");
 ```
 
 Keep the test only if the behavior under test is the orchestration:
@@ -105,7 +105,7 @@ function", with no behavioral assertion beyond "the import did not
 throw".
 
 ```typescript
-expect(typeof createThing).toBe('function');
+expect(typeof createThing).toBe("function");
 ```
 
 If importing the module is the contract, put that coverage in a package

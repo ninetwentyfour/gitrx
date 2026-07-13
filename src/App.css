@@ -2,49 +2,57 @@
   /* Typography */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    "MonacoLigaturized Nerd Font Mono", "Monaco", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Surfaces */
-  --color-bg: #f6f6f7;
+  --color-bg: #f7f7fa;
   --color-surface: #ffffff;
-  --color-surface-alt: #f0f0f2;
-  --color-border: #d9d9de;
-  --color-border-strong: #c2c2c9;
+  --color-surface-alt: #f0f0f5;
+  --color-border: #e2e2ec;
+  --color-border-strong: #cdcede;
 
   /* Text */
-  --color-text: #1c1c1e;
-  --color-text-muted: #6b6b73;
+  --color-text: #22242e;
+  --color-text-muted: #5b6088;
 
   /* Accent / interaction */
-  --color-accent: #2f6fed;
+  --color-accent: #5b64b8;
   --color-accent-fg: #ffffff;
-  --color-selection: #dbe7ff;
+  --color-selection: rgba(91, 100, 184, 0.14);
 
-  /* Status */
-  --status-modified: #b57a00;
-  --status-modified-bg: #fbeecb;
-  --status-added: #1f8a44;
-  --status-added-bg: #d8f0df;
-  --status-deleted: #c02626;
-  --status-deleted-bg: #f7d9d9;
-  --status-renamed: #2f6fed;
-  --status-renamed-bg: #dbe7ff;
-  --status-conflicted: #d9531e;
-  --status-conflicted-bg: #fbe0d1;
+  /* Signature magenta (Retrowave) — darkened for AA on light */
+  --color-magenta: #d6117e;
+  --color-magenta-fg: #ffffff;
+  --color-magenta-hover: #c00e70;
+  --color-magenta-disabled-bg: rgba(214, 17, 126, 0.25);
 
-  --diff-add: #1f8a44;
-  --diff-del: #c02626;
+  /* Status (fg / same-hue ~12% tint bg) */
+  --status-modified: #856000;
+  --status-modified-bg: rgba(154, 107, 0, 0.12);
+  --status-added: #526c00;
+  --status-added-bg: rgba(95, 125, 0, 0.12);
+  --status-deleted: #b8005c;
+  --status-deleted-bg: rgba(209, 0, 104, 0.12);
+  --status-renamed: #0a5fa8;
+  --status-renamed-bg: rgba(11, 110, 197, 0.12);
+  --status-conflicted: #6f5f00;
+  --status-conflicted-bg: rgba(143, 122, 0, 0.12);
+  --status-typechange: #7a4fd0;
+  --status-typechange-bg: rgba(122, 79, 208, 0.12);
 
-  /* Diff row backgrounds (softened GitHub/GitX tones) */
-  --diff-add-bg: #e6ffec;
-  --diff-del-bg: #ffebe9;
-  --diff-add-fg: #0a5c2b;
-  --diff-del-fg: #8a1a1a;
-  --diff-hunk-bg: #eef1f5;
+  --diff-add: #5f7d00;
+  --diff-del: #d10068;
+
+  /* Diff row backgrounds (translucent same-hue overlays) */
+  --diff-add-bg: rgba(122, 160, 0, 0.1);
+  --diff-del-bg: rgba(209, 0, 104, 0.08);
+  --diff-add-fg: #3f5400;
+  --diff-del-fg: #a30052;
+  --diff-hunk-bg: #f0f0f5;
   /* Translucent copy of --diff-hunk-bg for the sticky pinned hunk range/actions
      so overlapping header text can't read through, matched to the header bg. */
-  --diff-hunk-pin-bg: rgba(238, 241, 245, 0.9);
-  --diff-gutter-fg: #8a8a92;
+  --diff-hunk-pin-bg: rgba(240, 240, 245, 0.92);
+  --diff-gutter-fg: #8d92b5;
 
   --radius: 6px;
   --radius-sm: 4px;
@@ -69,125 +77,153 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #1c1c1e;
-    --color-surface: #242426;
-    --color-surface-alt: #2c2c2e;
-    --color-border: #3a3a3d;
-    --color-border-strong: #48484c;
+    --color-bg: #0a0a0d;
+    --color-surface: #101017;
+    --color-surface-alt: #16161f;
+    --color-border: #20202e;
+    --color-border-strong: #2e2e44;
 
-    --color-text: #f2f2f4;
-    --color-text-muted: #9a9aa2;
+    --color-text: #d6daf2;
+    --color-text-muted: #7984d1;
 
-    --color-accent: #4c8dff;
+    --color-accent: #7984d1;
     --color-accent-fg: #ffffff;
-    --color-selection: #2a3d5e;
+    --color-selection: rgba(121, 132, 209, 0.16);
 
-    --status-modified: #e0a83a;
-    --status-modified-bg: #40350f;
-    --status-added: #5cc47b;
-    --status-added-bg: #143a20;
-    --status-deleted: #f06d6d;
-    --status-deleted-bg: #3d1616;
-    --status-renamed: #6ba0ff;
-    --status-renamed-bg: #16294a;
-    --status-conflicted: #ff8a52;
-    --status-conflicted-bg: #3d2011;
+    --color-magenta: #fc28a8;
+    /* Near-black text on the lit magenta tube — neon-sign lettering, and AA
+       (~6:1) where white-on-#fc28a8 was 3.5:1. */
+    --color-magenta-fg: #0a0a0d;
+    --color-magenta-hover: #ff2e97;
+    --color-magenta-disabled-bg: rgba(252, 40, 168, 0.25);
 
-    --diff-add: #5cc47b;
-    --diff-del: #f06d6d;
+    --status-modified: #f7b83d;
+    --status-modified-bg: rgba(247, 184, 61, 0.14);
+    --status-added: #a7da1e;
+    --status-added-bg: rgba(167, 218, 30, 0.14);
+    --status-deleted: #ff0081;
+    --status-deleted-bg: rgba(255, 0, 129, 0.14);
+    --status-renamed: #1ea8fc;
+    --status-renamed-bg: rgba(30, 168, 252, 0.14);
+    --status-conflicted: #ffd400;
+    --status-conflicted-bg: rgba(255, 212, 0, 0.14);
+    --status-typechange: #a875ff;
+    --status-typechange-bg: rgba(168, 117, 255, 0.14);
 
-    --diff-add-bg: #12261e;
-    --diff-del-bg: #301a1c;
-    --diff-add-fg: #7ee2a0;
-    --diff-del-fg: #ff9e9e;
-    --diff-hunk-bg: #2c2c2e;
-    --diff-hunk-pin-bg: rgba(44, 44, 46, 0.9);
-    --diff-gutter-fg: #7a7a82;
+    --diff-add: #a7da1e;
+    --diff-del: #ff0081;
+
+    --diff-add-bg: rgba(167, 218, 30, 0.08);
+    --diff-del-bg: rgba(255, 0, 129, 0.09);
+    --diff-add-fg: #b9e05f;
+    --diff-del-fg: #ff6aa8;
+    --diff-hunk-bg: #101017;
+    --diff-hunk-pin-bg: rgba(16, 16, 23, 0.92);
+    --diff-gutter-fg: #565b80;
   }
 }
 
 /* Explicit light choice — wins over a dark system preference. */
 :root[data-theme="light"] {
-  --color-bg: #f6f6f7;
+  --color-bg: #f7f7fa;
   --color-surface: #ffffff;
-  --color-surface-alt: #f0f0f2;
-  --color-border: #d9d9de;
-  --color-border-strong: #c2c2c9;
+  --color-surface-alt: #f0f0f5;
+  --color-border: #e2e2ec;
+  --color-border-strong: #cdcede;
 
-  --color-text: #1c1c1e;
-  --color-text-muted: #6b6b73;
+  --color-text: #22242e;
+  --color-text-muted: #5b6088;
 
-  --color-accent: #2f6fed;
+  --color-accent: #5b64b8;
   --color-accent-fg: #ffffff;
-  --color-selection: #dbe7ff;
+  --color-selection: rgba(91, 100, 184, 0.14);
 
-  --status-modified: #b57a00;
-  --status-modified-bg: #fbeecb;
-  --status-added: #1f8a44;
-  --status-added-bg: #d8f0df;
-  --status-deleted: #c02626;
-  --status-deleted-bg: #f7d9d9;
-  --status-renamed: #2f6fed;
-  --status-renamed-bg: #dbe7ff;
-  --status-conflicted: #d9531e;
-  --status-conflicted-bg: #fbe0d1;
+  --color-magenta: #d6117e;
+  --color-magenta-fg: #ffffff;
+  --color-magenta-hover: #c00e70;
+  --color-magenta-disabled-bg: rgba(214, 17, 126, 0.25);
 
-  --diff-add: #1f8a44;
-  --diff-del: #c02626;
+  --status-modified: #856000;
+  --status-modified-bg: rgba(154, 107, 0, 0.12);
+  --status-added: #526c00;
+  --status-added-bg: rgba(95, 125, 0, 0.12);
+  --status-deleted: #b8005c;
+  --status-deleted-bg: rgba(209, 0, 104, 0.12);
+  --status-renamed: #0a5fa8;
+  --status-renamed-bg: rgba(11, 110, 197, 0.12);
+  --status-conflicted: #6f5f00;
+  --status-conflicted-bg: rgba(143, 122, 0, 0.12);
+  --status-typechange: #7a4fd0;
+  --status-typechange-bg: rgba(122, 79, 208, 0.12);
 
-  --diff-add-bg: #e6ffec;
-  --diff-del-bg: #ffebe9;
-  --diff-add-fg: #0a5c2b;
-  --diff-del-fg: #8a1a1a;
-  --diff-hunk-bg: #eef1f5;
+  --diff-add: #5f7d00;
+  --diff-del: #d10068;
+
+  --diff-add-bg: rgba(122, 160, 0, 0.1);
+  --diff-del-bg: rgba(209, 0, 104, 0.08);
+  --diff-add-fg: #3f5400;
+  --diff-del-fg: #a30052;
+  --diff-hunk-bg: #f0f0f5;
   /* Translucent copy of --diff-hunk-bg for the sticky pinned hunk range/actions
      so overlapping header text can't read through, matched to the header bg. */
-  --diff-hunk-pin-bg: rgba(238, 241, 245, 0.9);
-  --diff-gutter-fg: #8a8a92;
+  --diff-hunk-pin-bg: rgba(240, 240, 245, 0.92);
+  --diff-gutter-fg: #8d92b5;
 }
 
 /* Explicit dark choice — wins over a light system preference. */
 :root[data-theme="dark"] {
-  --color-bg: #1c1c1e;
-  --color-surface: #242426;
-  --color-surface-alt: #2c2c2e;
-  --color-border: #3a3a3d;
-  --color-border-strong: #48484c;
+  --color-bg: #0a0a0d;
+  --color-surface: #101017;
+  --color-surface-alt: #16161f;
+  --color-border: #20202e;
+  --color-border-strong: #2e2e44;
 
-  --color-text: #f2f2f4;
-  --color-text-muted: #9a9aa2;
+  --color-text: #d6daf2;
+  --color-text-muted: #7984d1;
 
-  --color-accent: #4c8dff;
+  --color-accent: #7984d1;
   --color-accent-fg: #ffffff;
-  --color-selection: #2a3d5e;
+  --color-selection: rgba(121, 132, 209, 0.16);
 
-  --status-modified: #e0a83a;
-  --status-modified-bg: #40350f;
-  --status-added: #5cc47b;
-  --status-added-bg: #143a20;
-  --status-deleted: #f06d6d;
-  --status-deleted-bg: #3d1616;
-  --status-renamed: #6ba0ff;
-  --status-renamed-bg: #16294a;
-  --status-conflicted: #ff8a52;
-  --status-conflicted-bg: #3d2011;
+  --color-magenta: #fc28a8;
+  --color-magenta-hover: #ff2e97;
+  --color-magenta-disabled-bg: rgba(252, 40, 168, 0.25);
 
-  --diff-add: #5cc47b;
-  --diff-del: #f06d6d;
+  --status-modified: #f7b83d;
+  --status-modified-bg: rgba(247, 184, 61, 0.14);
+  --status-added: #a7da1e;
+  --status-added-bg: rgba(167, 218, 30, 0.14);
+  --status-deleted: #ff0081;
+  --status-deleted-bg: rgba(255, 0, 129, 0.14);
+  --status-renamed: #1ea8fc;
+  --status-renamed-bg: rgba(30, 168, 252, 0.14);
+  --status-conflicted: #ffd400;
+  --status-conflicted-bg: rgba(255, 212, 0, 0.14);
+  --status-typechange: #a875ff;
+  --status-typechange-bg: rgba(168, 117, 255, 0.14);
 
-  --diff-add-bg: #12261e;
-  --diff-del-bg: #301a1c;
-  --diff-add-fg: #7ee2a0;
-  --diff-del-fg: #ff9e9e;
-  --diff-hunk-bg: #2c2c2e;
-  --diff-hunk-pin-bg: rgba(44, 44, 46, 0.9);
-  --diff-gutter-fg: #7a7a82;
+  --diff-add: #a7da1e;
+  --diff-del: #ff0081;
+
+  --diff-add-bg: rgba(167, 218, 30, 0.08);
+  --diff-del-bg: rgba(255, 0, 129, 0.09);
+  --diff-add-fg: #b9e05f;
+  --diff-del-fg: #ff6aa8;
+  --diff-hunk-bg: #101017;
+  --diff-hunk-pin-bg: rgba(16, 16, 23, 0.92);
+  --diff-gutter-fg: #565b80;
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* Signature magenta keyboard-focus ring, app-wide. */
+:focus-visible {
+  outline: 2px solid var(--color-magenta);
+  outline-offset: 1px;
 }
 
 html,
@@ -287,7 +323,7 @@ body {
   gap: 16px;
   height: 44px;
   padding: 0 14px;
-  background: var(--color-surface);
+  background: transparent;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -298,6 +334,8 @@ body {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .header-bar__repo {
@@ -362,9 +400,36 @@ body {
   white-space: nowrap;
 }
 
+/* WKWebView ignores accent-color on range inputs (renders a white thumb on a
+   near-invisible track), so the track and thumb are drawn explicitly. */
 .context-slider input[type="range"] {
-  accent-color: var(--color-accent);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 120px;
+  height: 16px;
+  background: transparent;
   cursor: pointer;
+}
+
+.context-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(121, 132, 209, 0.4);
+}
+
+.context-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-magenta);
+}
+
+.context-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-magenta);
+  outline-offset: 2px;
 }
 
 /* ---------- Toasts ---------- */
@@ -387,11 +452,11 @@ body {
   padding: 8px 12px;
   font: inherit;
   text-align: left;
-  color: var(--status-deleted);
-  background: var(--status-deleted-bg);
-  border: 1px solid var(--status-deleted);
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border-strong);
+  border-left: 2px solid var(--color-magenta);
   border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
   cursor: pointer;
   pointer-events: auto;
 }
@@ -526,6 +591,8 @@ body {
   text-overflow: ellipsis;
   padding-right: 8px;
   background: var(--diff-hunk-pin-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 /* The action buttons pin to the RIGHT scroll edge (a small inset from the
@@ -553,10 +620,15 @@ body {
   font-family: var(--font-sans);
   font-size: 11px;
   color: var(--color-text);
-  background: var(--color-surface);
+  background: transparent;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background 120ms;
+}
+
+.hunk__btn:hover:not(:disabled) {
+  background: var(--color-surface-alt);
 }
 
 .hunk__btn:disabled {
@@ -655,7 +727,7 @@ body {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--color-text-muted);
 }
 
@@ -665,6 +737,8 @@ body {
   resize: none;
   padding: 8px;
   font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
   color: var(--color-text);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -689,18 +763,32 @@ body {
   color: var(--color-text-muted);
 }
 
+.commit-panel__amend input[type="checkbox"] {
+  accent-color: var(--color-magenta);
+}
+
+/* Signature: the Commit button in Retrowave magenta. */
 .commit-panel__commit {
   padding: 6px 14px;
   font: inherit;
   font-weight: 500;
-  color: var(--color-accent-fg);
-  background: var(--color-accent);
+  color: var(--color-magenta-fg);
+  background: var(--color-magenta);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background 120ms,
+    color 120ms;
+}
+
+.commit-panel__commit:hover:not(:disabled) {
+  background: var(--color-magenta-hover);
 }
 
 .commit-panel__commit:disabled {
-  opacity: 0.5;
+  color: var(--color-text-muted);
+  background: var(--color-magenta-disabled-bg);
   cursor: default;
 }
 
@@ -724,7 +812,7 @@ body {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--color-text-muted);
   background: var(--color-surface-alt);
   border-bottom: 1px solid var(--color-border);
@@ -732,7 +820,8 @@ body {
 
 .file-list__count {
   padding: 0 6px;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 16px;
   color: var(--color-text-muted);
   background: var(--color-bg);
@@ -842,8 +931,8 @@ body {
 }
 
 .status-badge--typechange {
-  color: var(--color-text-muted);
-  background: var(--color-surface-alt);
+  color: var(--status-typechange);
+  background: var(--status-typechange-bg);
 }
 
 /* Truncate the START of long paths, keep the filename visible. The container is
@@ -858,6 +947,7 @@ body {
   direction: rtl;
   text-align: left;
   font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .file-row__path-text {
@@ -866,7 +956,8 @@ body {
 
 .file-row__stat {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -882,4 +973,12 @@ body {
 .file-row__stat--binary {
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+/* Honour reduced-motion for the colour/background transitions added above. */
+@media (prefers-reduced-motion: reduce) {
+  .commit-panel__commit,
+  .hunk__btn {
+    transition: none;
+  }
 }

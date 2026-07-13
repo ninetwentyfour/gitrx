@@ -1,6 +1,7 @@
 # Advanced TypeScript and Iterator Features
 
 ## When to Read This
+
 Read this when using modern TypeScript generics or ESNext iterator helper APIs.
 
 ## Iterator Helpers Over Spread
@@ -16,7 +17,10 @@ const active = [...map.values()].filter((n) => !n.deleted);
 
 // Good
 const all = map.values().toArray();
-const active = map.values().filter((n) => !n.deleted).toArray();
+const active = map
+  .values()
+  .filter((n) => !n.deleted)
+  .toArray();
 ```
 
 `.sort()` is not on `IteratorObject` (requires random access). Materialize first: `map.values().toArray().sort(fn)`.
@@ -37,17 +41,17 @@ The `const` modifier preserves literal types; the `readonly` constraint determin
 ```typescript
 // From packages/epicenter/src/core/schema/fields/factories.ts
 export function select<const TOptions extends readonly [string, ...string[]]>({
-	id,
-	options,
+  id,
+  options,
 }: {
-	id: string;
-	options: TOptions;
+  id: string;
+  options: TOptions;
 }): SelectField<TOptions> {
-	// ...
+  // ...
 }
 
 // Caller gets literal union type — no `as const` needed
-const status = select({ id: 'status', options: ['draft', 'published'] });
+const status = select({ id: "status", options: ["draft", "published"] });
 // status.options[number] is "draft" | "published", not string
 ```
 

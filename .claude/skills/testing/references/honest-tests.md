@@ -32,9 +32,9 @@ the test's own setup makes structurally impossible to reach.
 
 ```typescript
 // SMELL: alternatives are pre-excluded by the setup
-test('initial status is offline or connecting', () => {
-  const { collaboration } = setup();           // supervisor parks in CONNECTING sync
-  expect(['offline', 'connecting']).toContain(collaboration.status.phase);
+test("initial status is offline or connecting", () => {
+  const { collaboration } = setup(); // supervisor parks in CONNECTING sync
+  expect(["offline", "connecting"]).toContain(collaboration.status.phase);
 });
 ```
 
@@ -48,9 +48,9 @@ with a specific cause.
 
 ```typescript
 // SMELL: asserting that an object literal assigns its own property
-test('exposes the supplied installationId', () => {
-  const { collaboration } = setup({ installationId: 'self' });
-  expect(collaboration.installationId).toBe('self');
+test("exposes the supplied installationId", () => {
+  const { collaboration } = setup({ installationId: "self" });
+  expect(collaboration.installationId).toBe("self");
 });
 ```
 
@@ -67,7 +67,7 @@ function stalledOpenWebSocket(): Promise<WebSocket> {
     readyState: 0,
     // ... 27 lines of listeners, send, binaryType, addEventListener, etc.
   };
-  return Promise.resolve(ws);  // returns a socket that never opens
+  return Promise.resolve(ws); // returns a socket that never opens
 }
 ```
 
@@ -95,7 +95,7 @@ function fakeWebSocket(): Promise<WebSocket> {
     close() {
       if (ws.readyState === 3) return;
       ws.readyState = 3;
-      ws.onclose?.({ code: 1000, reason: '' } as CloseEvent);
+      ws.onclose?.({ code: 1000, reason: "" } as CloseEvent);
     },
   };
   return Promise.resolve(ws as unknown as WebSocket);
@@ -118,11 +118,11 @@ the doc is worse than missing: it lies to the next reader.
  */
 function stalledOpenWebSocket(): Promise<WebSocket> {
   // ...
-  return Promise.resolve(ws);  // <- promise resolves immediately
+  return Promise.resolve(ws); // <- promise resolves immediately
 }
 ```
 
-The *socket* stalls in CONNECTING; the *promise* resolves. Fix the doc
+The _socket_ stalls in CONNECTING; the _promise_ resolves. Fix the doc
 to describe what the file actually exercises, and name what it
 deliberately doesn't.
 
@@ -130,10 +130,10 @@ deliberately doesn't.
 
 ```typescript
 // BORDERLINE: dispose() is literally ydoc.destroy()
-test('dispose destroys the underlying ydoc', () => {
+test("dispose destroys the underlying ydoc", () => {
   const { ydoc, collaboration } = setup();
   let destroyed = 0;
-  ydoc.once('destroy', () => destroyed++);
+  ydoc.once("destroy", () => destroyed++);
   collaboration[Symbol.dispose]();
   expect(destroyed).toBe(1);
 });

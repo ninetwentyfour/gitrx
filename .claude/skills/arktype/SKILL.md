@@ -1,9 +1,9 @@
 ---
 name: arktype
-description: 'Arktype: runtime validation, discriminated unions with .merge()/.or(), spread keys. Use when mentioning arktype, type(), union types, command/event schemas.'
+description: "Arktype: runtime validation, discriminated unions with .merge()/.or(), spread keys. Use when mentioning arktype, type(), union types, command/event schemas."
 metadata:
   author: epicenter
-  version: '1.0'
+  version: "1.0"
 ---
 
 # Arktype Patterns
@@ -15,34 +15,34 @@ Patterns for composing arktype schemas, naming runtime schema values alongside i
 Use when you have shared base fields and per-variant payloads discriminated on a literal key. `.merge()` distributes over unions: it merges the base into each branch of the union automatically.
 
 ```typescript
-import { type } from 'arktype';
+import { type } from "arktype";
 
 const commandBase = type({
-	id: 'string',
-	deviceId: DeviceId,
-	createdAt: 'number',
-	_v: '1',
+  id: "string",
+  deviceId: DeviceId,
+  createdAt: "number",
+  _v: "1",
 });
 
 const Command = commandBase.merge(
-	type.or(
-		{
-			action: "'closeTabs'",
-			tabIds: 'string[]',
-			'result?': type({ closedCount: 'number' }).or('undefined'),
-		},
-		{
-			action: "'openTab'",
-			url: 'string',
-			'windowId?': 'string',
-			'result?': type({ tabId: 'string' }).or('undefined'),
-		},
-		{
-			action: "'activateTab'",
-			tabId: 'string',
-			'result?': type({ activated: 'boolean' }).or('undefined'),
-		},
-	),
+  type.or(
+    {
+      action: "'closeTabs'",
+      tabIds: "string[]",
+      "result?": type({ closedCount: "number" }).or("undefined"),
+    },
+    {
+      action: "'openTab'",
+      url: "string",
+      "windowId?": "string",
+      "result?": type({ tabId: "string" }).or("undefined"),
+    },
+    {
+      action: "'activateTab'",
+      tabId: "string",
+      "result?": type({ activated: "boolean" }).or("undefined"),
+    },
+  ),
 );
 ```
 
@@ -56,14 +56,14 @@ const Command = commandBase.merge(
 
 ### Why this pattern
 
-| Property               | Benefit                                            |
-| ---------------------- | -------------------------------------------------- |
-| Base is a real `Type`  | Reusable, composable, inspectable at runtime       |
-| `.merge()` distributes | No need to repeat `base.merge(...)` per variant    |
-| `type.or()` is flat    | All variants in one list, easy to read and add to  |
-| Base appears once      | DRY: change base fields in one place               |
-| Auto-discrimination    | No manual discriminant config needed               |
-| Flat payload           | No nested `payload` object; fields are top-level   |
+| Property               | Benefit                                           |
+| ---------------------- | ------------------------------------------------- |
+| Base is a real `Type`  | Reusable, composable, inspectable at runtime      |
+| `.merge()` distributes | No need to repeat `base.merge(...)` per variant   |
+| `type.or()` is flat    | All variants in one list, easy to read and add to |
+| Base appears once      | DRY: change base fields in one place              |
+| Auto-discrimination    | No manual discriminant config needed              |
+| Flat payload           | No nested `payload` object; fields are top-level  |
 
 ## `.merge().or()` Chaining Pattern (Good for 2-3 variants)
 
@@ -71,18 +71,18 @@ Use when you have a small number of variants where chaining reads naturally.
 
 ```typescript
 const Command = commandBase
-	.merge({
-		action: "'closeTabs'",
-		tabIds: 'string[]',
-		'result?': type({ closedCount: 'number' }).or('undefined'),
-	})
-	.or(
-		commandBase.merge({
-			action: "'openTab'",
-			url: 'string',
-			'result?': type({ tabId: 'string' }).or('undefined'),
-		}),
-	);
+  .merge({
+    action: "'closeTabs'",
+    tabIds: "string[]",
+    "result?": type({ closedCount: "number" }).or("undefined"),
+  })
+  .or(
+    commandBase.merge({
+      action: "'openTab'",
+      url: "string",
+      "result?": type({ tabId: "string" }).or("undefined"),
+    }),
+  );
 ```
 
 For 4+ variants, prefer `base.merge(type.or(...))` to avoid repeating `commandBase.merge(...)` per branch.
@@ -92,12 +92,12 @@ For 4+ variants, prefer `base.merge(type.or(...))` to avoid repeating `commandBa
 Use when defining inline without a pre-declared base variable, or when you prefer a more compact syntax.
 
 ```typescript
-const User = type({ isAdmin: 'false', name: 'string' });
+const User = type({ isAdmin: "false", name: "string" });
 
 const Admin = type({
-	'...': User,
-	isAdmin: 'true',
-	permissions: 'string[]',
+  "...": User,
+  isAdmin: "true",
+  permissions: "string[]",
 });
 ```
 
@@ -109,13 +109,13 @@ The `"..."` key spreads all properties from the referenced type into the new obj
 
 ```typescript
 const Command = type({
-	'...': commandBase,
-	action: "'closeTabs'",
-	tabIds: 'string[]',
+  "...": commandBase,
+  action: "'closeTabs'",
+  tabIds: "string[]",
 }).or({
-	'...': commandBase,
-	action: "'openTab'",
-	url: 'string',
+  "...": commandBase,
+  action: "'openTab'",
+  url: "string",
 });
 ```
 
@@ -143,7 +143,7 @@ The static form avoids deeply nested chaining and creates the union in a single 
 
 ```typescript
 // base.merge(union): distributes merge across each branch
-const Result = baseType.merge(type.or({ a: 'string' }, { b: 'number' }));
+const Result = baseType.merge(type.or({ a: "string" }, { b: "number" }));
 // Equivalent to: type.or(baseType.merge({ a: 'string' }), baseType.merge({ b: 'number' }))
 ```
 
@@ -151,10 +151,10 @@ const Result = baseType.merge(type.or({ a: 'string' }, { b: 'number' }));
 
 ```typescript
 // ❌ WRONG: 'string' is not an object type
-commandBase.merge(type.or({ a: 'string' }, 'string'));
+commandBase.merge(type.or({ a: "string" }, "string"));
 
 // ✅ CORRECT: all branches are object types
-commandBase.merge(type.or({ a: 'string' }, { b: 'number' }));
+commandBase.merge(type.or({ a: "string" }, { b: "number" }));
 ```
 
 ## Optional Properties in Unions
@@ -164,17 +164,17 @@ Use arktype's `'key?'` syntax for optional properties. Never use `| undefined` f
 ```typescript
 // Good: optional property syntax
 commandBase.merge({
-	action: "'openTab'",
-	url: 'string',
-	'windowId?': 'string',
-	'result?': type({ tabId: 'string' }).or('undefined'),
+  action: "'openTab'",
+  url: "string",
+  "windowId?": "string",
+  "result?": type({ tabId: "string" }).or("undefined"),
 });
 
 // Bad: explicit undefined union on a required key
 commandBase.merge({
-	action: "'openTab'",
-	url: 'string',
-	windowId: 'string | undefined', // Breaks JSON Schema
+  action: "'openTab'",
+  url: "string",
+  windowId: "string | undefined", // Breaks JSON Schema
 });
 ```
 
@@ -192,9 +192,9 @@ The `'result?': type({...}).or('undefined')` pattern is correct. The `?` makes t
 Arktype auto-detects discriminants when union branches have distinct literal values on the same key:
 
 ```typescript
-const AorB = type({ kind: "'A'", value: 'number' }).or({
-	kind: "'B'",
-	label: 'string',
+const AorB = type({ kind: "'A'", value: "number" }).or({
+  kind: "'B'",
+  label: "string",
 });
 
 // Arktype internally uses `kind` as the discriminant
@@ -210,19 +210,19 @@ When extracting reusable arktype types into named constants, always wrap them wi
 ```typescript
 // GOOD: wrapped with type(), composable, has .infer, works with .or()/.merge()
 const tabGroupColor = type(
-	"'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'",
+  "'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'",
 );
 
 const commandBase = type({
-	id: CommandId,
-	deviceId: DeviceId,
-	createdAt: 'number',
-	_v: '1',
+  id: CommandId,
+  deviceId: DeviceId,
+  createdAt: "number",
+  _v: "1",
 });
 
 // BAD: plain string, not a Type, can't compose, no .infer
 const tabGroupColor =
-	"'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'";
+  "'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'";
 ```
 
 Both work when used as a value inside `type({...})` object literals (arktype coerces strings). But only the `type()`-wrapped version is a first-class `Type` that works in all positions.
@@ -233,14 +233,14 @@ When an arktype schema exports both a runtime value and its inferred type with t
 
 ```typescript
 // Good: one import covers both namespaces
-import { WorkspaceId } from './workspace-id';
+import { WorkspaceId } from "./workspace-id";
 
 const Session = type({
-	workspaceId: WorkspaceId,
+  workspaceId: WorkspaceId,
 });
 
 type SessionResponse = {
-	workspaceId: WorkspaceId;
+  workspaceId: WorkspaceId;
 };
 ```
 
@@ -248,13 +248,10 @@ Avoid aliasing the runtime schema just to make room for the type import.
 
 ```typescript
 // Bad: duplicates the name with an artificial Schema suffix
-import {
-	WorkspaceId as WorkspaceIdSchema,
-	type WorkspaceId,
-} from './workspace-id';
+import { WorkspaceId as WorkspaceIdSchema, type WorkspaceId } from "./workspace-id";
 
 const Session = type({
-	workspaceId: WorkspaceIdSchema,
+  workspaceId: WorkspaceIdSchema,
 });
 ```
 
@@ -265,9 +262,9 @@ Reach for an alias only when two imported values genuinely collide in the same n
 Use `type.enumerated()` to create string literal unions from existing `as const` arrays. This keeps the workspace schema in sync with app constants automatically.
 
 ```typescript
-import { type } from 'arktype';
+import { type } from "arktype";
 
-const RECORDING_MODES = ['manual', 'vad', 'upload'] as const;
+const RECORDING_MODES = ["manual", "vad", "upload"] as const;
 
 // Spread the const array into type.enumerated()
 const recordingMode = type.enumerated(...RECORDING_MODES);
@@ -280,13 +277,11 @@ When constants are objects with a `name` or `id` field, map first:
 
 ```typescript
 const OPENAI_TRANSCRIPTION_MODELS = [
-	{ name: 'whisper-1', description: '...', cost: '$0.36/hour' },
-	{ name: 'gpt-4o-transcribe', description: '...', cost: '$0.36/hour' },
+  { name: "whisper-1", description: "...", cost: "$0.36/hour" },
+  { name: "gpt-4o-transcribe", description: "...", cost: "$0.36/hour" },
 ] as const;
 
-const openaiModel = type.enumerated(
-	...OPENAI_TRANSCRIPTION_MODELS.map((m) => m.name),
-);
+const openaiModel = type.enumerated(...OPENAI_TRANSCRIPTION_MODELS.map((m) => m.name));
 ```
 
 ### In discriminated unions
@@ -295,9 +290,9 @@ Combine with `base.merge(type.or(...))` to build unions where each variant's mod
 
 ```typescript
 const transcriptionConfig = type.or(
-	{ service: "'OpenAI'", model: type.enumerated(...OPENAI_MODELS.map((m) => m.name)) },
-	{ service: "'Groq'", model: type.enumerated(...GROQ_MODELS.map((m) => m.name)) },
-	{ service: "'whispercpp'" },  // local: no model field
+  { service: "'OpenAI'", model: type.enumerated(...OPENAI_MODELS.map((m) => m.name)) },
+  { service: "'Groq'", model: type.enumerated(...GROQ_MODELS.map((m) => m.name)) },
+  { service: "'whispercpp'" }, // local: no model field
 );
 ```
 
@@ -313,10 +308,10 @@ const transcriptionConfig = type.or(
 
 ```typescript
 // Bad: base is a plain object, not a Type
-const baseFields = { id: 'string', deviceId: DeviceId, createdAt: 'number' };
+const baseFields = { id: "string", deviceId: DeviceId, createdAt: "number" };
 const Command = type({ ...baseFields, action: "'closeTabs'" }).or({
-	...baseFields,
-	action: "'openTab'",
+  ...baseFields,
+  action: "'openTab'",
 });
 ```
 
@@ -327,18 +322,18 @@ This works but `baseFields` is not an arktype `Type`. You can't call `.merge()`,
 ```typescript
 // Bad: repetitive, base.merge repeated for every variant
 type.or(
-	commandBase.merge({ action: "'closeTabs'", tabIds: 'string[]' }),
-	commandBase.merge({ action: "'openTab'", url: 'string' }),
-	commandBase.merge({ action: "'activateTab'", tabId: 'string' }),
+  commandBase.merge({ action: "'closeTabs'", tabIds: "string[]" }),
+  commandBase.merge({ action: "'openTab'", url: "string" }),
+  commandBase.merge({ action: "'activateTab'", tabId: "string" }),
 );
 
 // Good: merge once, union the variants
 commandBase.merge(
-	type.or(
-		{ action: "'closeTabs'", tabIds: 'string[]' },
-		{ action: "'openTab'", url: 'string' },
-		{ action: "'activateTab'", tabId: 'string' },
-	),
+  type.or(
+    { action: "'closeTabs'", tabIds: "string[]" },
+    { action: "'openTab'", url: "string" },
+    { action: "'activateTab'", tabId: "string" },
+  ),
 );
 ```
 
@@ -346,10 +341,10 @@ commandBase.merge(
 
 ```typescript
 // Bad: makes windowId required but accepting undefined
-commandBase.merge({ windowId: 'string | undefined' });
+commandBase.merge({ windowId: "string | undefined" });
 
 // Good: makes windowId truly optional
-commandBase.merge({ 'windowId?': 'string' });
+commandBase.merge({ "windowId?": "string" });
 ```
 
 ## References

@@ -11,10 +11,10 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Good: imported from the owner package
-  import type { User } from 'better-auth';
+  import type { User } from "better-auth";
 
   // Good: derived from a runtime schema
-  export const AuthUser = type({ id: 'string', email: 'string' });
+  export const AuthUser = type({ id: "string", email: "string" });
   export type AuthUser = typeof AuthUser.infer;
 
   // Good: derived from a function or factory
@@ -66,18 +66,15 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Bad: the same retype is subtracted and re-added in both types.
-  type Connected =
-    Omit<Workspace, 'tables'> & { tables: ConnectedTables };
-  type ConnectedWithInfra =
-    Omit<Workspace, 'tables'> & {
-      tables: ConnectedTables;
-      idb: Idb;
-      wipe(): Promise<void>;
-    };
+  type Connected = Omit<Workspace, "tables"> & { tables: ConnectedTables };
+  type ConnectedWithInfra = Omit<Workspace, "tables"> & {
+    tables: ConnectedTables;
+    idb: Idb;
+    wipe(): Promise<void>;
+  };
 
   // Good: the retype happens once; the richer type is additive.
-  type Connected =
-    Omit<Workspace, 'tables'> & { tables: ConnectedTables };
+  type Connected = Omit<Workspace, "tables"> & { tables: ConnectedTables };
   type ConnectedWithInfra = Connected & {
     idb: Idb;
     wipe(): Promise<void>;
@@ -104,8 +101,8 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
   type Builder = Base & { step(x: Input): Base };
 
   declare const builder: Builder;
-  builder.step(a);          // ok
-  builder.step(a).step(b);  // compile error: step is gone after the first call
+  builder.step(a); // ok
+  builder.step(a).step(b); // compile error: step is gone after the first call
   ```
 
 - Always use `type` instead of `interface` in TypeScript.
@@ -114,16 +111,16 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
   ```typescript
   // Good - readonly only on the array
   type Config = {
-	version: number;
-	vendor: string;
-	items: readonly string[];
+    version: number;
+    vendor: string;
+    items: readonly string[];
   };
 
   // Bad - readonly everywhere is noise
   type Config = {
-	readonly version: number;
-	readonly vendor: string;
-	readonly items: readonly string[];
+    readonly version: number;
+    readonly vendor: string;
+    readonly items: readonly string[];
   };
   ```
 
@@ -156,9 +153,7 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
   const filtered = items.filter((x) => x !== undefined);
 
   // Bad - unnecessary type predicate
-  const filtered = items.filter(
-	(x): x is NonNullable<typeof x> => x !== undefined,
-  );
+  const filtered = items.filter((x): x is NonNullable<typeof x> => x !== undefined);
   ```
 
 - When moving components to new locations, always update relative imports to absolute imports (e.g., change `import Component from '../Component.svelte'` to `import Component from '$lib/components/Component.svelte'`)
@@ -166,17 +161,18 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Good: .js extension in relative imports
-  import { parseSkill } from './parse.js';
-  import type { Skill } from './types.js';
+  import { parseSkill } from "./parse.js";
+  import type { Skill } from "./types.js";
 
   // Bad: no extension (fails with module: preserve)
-  import { parseSkill } from './parse';
+  import { parseSkill } from "./parse";
 
   // Bad: .ts extension (non-standard, won't resolve correctly)
-  import { parseSkill } from './parse.ts';
+  import { parseSkill } from "./parse.ts";
   ```
 
   This does NOT apply to package imports (`import { type } from 'arktype'`) or path aliases (`import Component from '$lib/components/Foo.svelte'`): only bare relative paths.
+
 - **`export { }` is only for barrel files**: Every symbol is exported directly at its declaration (`export type`, `export const`, `export function`). The `export { Foo } from './bar'` re-export syntax is reserved for `index.ts` barrel files: that is their entire job. Don't add re-exports at the bottom of implementation files "for convenience"; they go unused, leave orphaned imports, and create a false second import path.
 
   ```typescript
@@ -192,24 +188,25 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
   // Bad: re-export at bottom of create-tables.ts
   export type { TablesHelper, TableDefinitions };
   ```
+
 - **Question single-method `Pick` dependencies**: `Pick<T, K>` is fine for data projection, but `Pick<Thing, 'method'>` in dependency injection is often a boundary smell. If the caller only needs one operation, prefer a named capability function in the caller's language. Keep the object shape only when the caller participates in that object's life cycle or needs the rest of the capability family. See `docs/articles/single-method-pick-is-a-boundary-leak.md`.
 - When functions are only used in the return statement of a factory/creator function, use object method shorthand syntax instead of defining them separately. For example, instead of:
   ```typescript
   function myFunction() {
-	const helper = () => {
-		/* ... */
-	};
-	return { helper };
+    const helper = () => {
+      /* ... */
+    };
+    return { helper };
   }
   ```
   Use:
   ```typescript
   function myFunction() {
-	return {
-		helper() {
-			/* ... */
-		},
-	};
+    return {
+      helper() {
+        /* ... */
+      },
+    };
   }
   ```
 - **Prefer factory functions over classes**: Use `function createX() { return { ... } }` instead of `class X { ... }`. Closures provide structural privacy: everything above the return statement is private by position, everything inside it is the public API. Classes mix `private`/`protected`/public members in arbitrary order, forcing you to scan every member and check its modifier. See `docs/articles/closures-are-better-privacy-than-keywords.md` for rationale.
@@ -231,18 +228,14 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Good: destructure in the signature
-  export function createThing<T>({
-	name,
-	value,
-	onError,
-  }: ThingOptions<T>) {
-	// function body starts here
+  export function createThing<T>({ name, value, onError }: ThingOptions<T>) {
+    // function body starts here
   }
 
   // Bad: intermediate `options` parameter, destructured on first line
   export function createThing<T>(options: ThingOptions<T>) {
-	const { name, value, onError } = options;
-	// ...
+    const { name, value, onError } = options;
+    // ...
   }
   ```
 
@@ -252,10 +245,7 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Good
-  export function createThing({
-    name,
-    value = defaultValue,
-  }: ThingOptions = {}) {
+  export function createThing({ name, value = defaultValue }: ThingOptions = {}) {
     // ...
   }
 
@@ -277,14 +267,14 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
   ```typescript
   // Good: inner functions let TS infer
   function parseValue(raw: string | null) {
-	if (raw === null) return defaultValue;
-	return JSON.parse(raw);
+    if (raw === null) return defaultValue;
+    return JSON.parse(raw);
   }
 
   // Bad: unnecessary return type annotation
   function parseValue(raw: string | null): SomeType {
-	if (raw === null) return defaultValue;
-	return JSON.parse(raw);
+    if (raw === null) return defaultValue;
+    return JSON.parse(raw);
   }
   ```
 
@@ -292,10 +282,9 @@ Detailed examples for the baseline TypeScript rules used across Epicenter.
 
   ```typescript
   // Good: the factory owns the shape
-  export function createBrowserDocCache<
-    TId extends string,
-    TDocument extends BrowserDocInstance,
-  >(source: BrowserDocSource<TId, TDocument>) {
+  export function createBrowserDocCache<TId extends string, TDocument extends BrowserDocInstance>(
+    source: BrowserDocSource<TId, TDocument>,
+  ) {
     return {
       open(id: TId): TDocument & Disposable {
         return source.create(id);

@@ -17,23 +17,23 @@ For library code, test that incorrect types are rejected. Use `@ts-expect-error`
 ### Pattern
 
 ```typescript
-test('rejects invalid row data at compile time', () => {
-	const doc = createTables(new Y.Doc(), [
-		table({
-			id: 'posts',
-			name: '',
-			fields: [id(), text({ id: 'title' })] as const,
-		}),
-	]);
+test("rejects invalid row data at compile time", () => {
+  const doc = createTables(new Y.Doc(), [
+    table({
+      id: "posts",
+      name: "",
+      fields: [id(), text({ id: "title" })] as const,
+    }),
+  ]);
 
-	// @ts-expect-error — missing required field 'title'
-	doc.get('posts').upsert({ id: Id('1') });
+  // @ts-expect-error — missing required field 'title'
+  doc.get("posts").upsert({ id: Id("1") });
 
-	// @ts-expect-error — wrong type for 'title' (number instead of string)
-	doc.get('posts').upsert({ id: Id('1'), title: 42 });
+  // @ts-expect-error — wrong type for 'title' (number instead of string)
+  doc.get("posts").upsert({ id: Id("1"), title: 42 });
 
-	// @ts-expect-error — unknown table name
-	doc.get('nonexistent');
+  // @ts-expect-error — unknown table name
+  doc.get("nonexistent");
 });
 ```
 
@@ -69,9 +69,7 @@ Tests MUST NOT use `as any` to bypass type checking. Tests should prove the type
 
 ```typescript
 // Testing runtime error for invalid table name — bypasses TypeScript intentionally
-expect(() => tables.get('nonexistent' as any)).toThrow(
-	/Table 'nonexistent' not found/,
-);
+expect(() => tables.get("nonexistent" as any)).toThrow(/Table 'nonexistent' not found/);
 ```
 
 ### Never Acceptable
@@ -79,5 +77,5 @@ expect(() => tables.get('nonexistent' as any)).toThrow(
 ```typescript
 // Bad — hiding a real type problem
 const result = someFunction(data as any);
-expect(result).toBe('expected');
+expect(result).toBe("expected");
 ```

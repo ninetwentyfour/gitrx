@@ -3,7 +3,7 @@ name: testing
 description: 'Test file conventions: setup functions, factories, Result assertion helpers, organization, type testing, naming, and pruning low-value tests. Use when: "write tests", "add a test", "fix this test", "delete tests", "prune tests", "audit tests", or modifying *.test.ts files.'
 metadata:
   author: epicenter
-  version: '2.0'
+  version: "2.0"
 ---
 
 # Test File Conventions
@@ -34,13 +34,13 @@ When a test asserts a wellcrafted `Result`, use `expectOk` and `expectErr`
 from `wellcrafted/testing` instead of hand-rolled error checks.
 
 ```ts
-import { expectErr, expectOk } from 'wellcrafted/testing';
+import { expectErr, expectOk } from "wellcrafted/testing";
 
 const data = expectOk(await service.doThing());
-expect(data.id).toBe('1');
+expect(data.id).toBe("1");
 
 const error = expectErr(await service.doThing({ invalid: true }));
-expect(error.name).toBe('InvalidInput');
+expect(error.name).toBe("InvalidInput");
 ```
 
 Avoid local helper clones, `expect(error).toBeNull()` success checks, and

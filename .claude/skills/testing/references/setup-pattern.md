@@ -26,30 +26,30 @@ Every test file that needs shared infrastructure MUST have a `setup()` function.
 ```typescript
 // Good: always an object, even for one thing
 function setup() {
-	const workspace = createWorkspace({
-		id: 'test',
-		tables: { files: filesTable },
-		kv: {},
-	});
-	return { files: workspace.tables.files };
+  const workspace = createWorkspace({
+    id: "test",
+    tables: { files: filesTable },
+    kv: {},
+  });
+  return { files: workspace.tables.files };
 }
 
-test('creates a file', () => {
-	const { files } = setup();
-	files.set({ id: asFileId('1'), name: 'test.txt' });
-	expect(files.has('1')).toBe(true);
+test("creates a file", () => {
+  const { files } = setup();
+  files.set({ id: asFileId("1"), name: "test.txt" });
+  expect(files.has("1")).toBe(true);
 });
 ```
 
 ```typescript
 // Bad: returns value directly
 function setup() {
-	const workspace = createWorkspace({
-		id: 'test',
-		tables: { files: filesTable },
-		kv: {},
-	});
-	return workspace.tables.files; // No destructuring = breaks convention
+  const workspace = createWorkspace({
+    id: "test",
+    tables: { files: filesTable },
+    kv: {},
+  });
+  return workspace.tables.files; // No destructuring = breaks convention
 }
 ```
 
@@ -57,22 +57,22 @@ function setup() {
 
 ```typescript
 function setup() {
-	const ydoc = new Y.Doc();
-	const yarray = ydoc.getArray<YKeyValueLwwEntry<unknown>>('test-table');
-	const ykv = new YKeyValueLww(yarray);
-	return { ydoc, yarray, ykv };
+  const ydoc = new Y.Doc();
+  const yarray = ydoc.getArray<YKeyValueLwwEntry<unknown>>("test-table");
+  const ykv = new YKeyValueLww(yarray);
+  return { ydoc, yarray, ykv };
 }
 
-test('stores a row', () => {
-	const { ykv } = setup(); // Take only what you need
-	// ...
+test("stores a row", () => {
+  const { ykv } = setup(); // Take only what you need
+  // ...
 });
 
-test('atomic transactions', () => {
-	const { ydoc, ykv } = setup(); // Take multiple when needed
-	ydoc.transact(() => {
-		ykv.set('1', { name: 'Alice' });
-	});
+test("atomic transactions", () => {
+  const { ydoc, ykv } = setup(); // Take multiple when needed
+  ydoc.transact(() => {
+    ykv.set("1", { name: "Alice" });
+  });
 });
 ```
 
@@ -82,26 +82,24 @@ When tests need additional setup beyond the base, create composable setup varian
 
 ```typescript
 function setup() {
-	const tableDef = defineTable(fileSchema);
-	const workspace = createWorkspace({
-		id: 'test-workspace',
-		tables: { files: tableDef },
-		kv: {},
-	});
-	return { ydoc: workspace.ydoc, tables: workspace.tables };
+  const tableDef = defineTable(fileSchema);
+  const workspace = createWorkspace({
+    id: "test-workspace",
+    tables: { files: tableDef },
+    kv: {},
+  });
+  return { ydoc: workspace.ydoc, tables: workspace.tables };
 }
 
-function setupWithBinding(
-	overrides?: Partial<Parameters<typeof createDocumentBinding>[0]>,
-) {
-	const { ydoc, tables } = setup();
-	const binding = createDocumentBinding({
-		guidKey: 'id',
-		tableHelper: tables.files,
-		ydoc,
-		...overrides,
-	});
-	return { ydoc, tables, binding };
+function setupWithBinding(overrides?: Partial<Parameters<typeof createDocumentBinding>[0]>) {
+  const { ydoc, tables } = setup();
+  const binding = createDocumentBinding({
+    guidKey: "id",
+    tableHelper: tables.files,
+    ydoc,
+    ...overrides,
+  });
+  return { ydoc, tables, binding };
 }
 ```
 
@@ -119,22 +117,22 @@ Use `beforeEach`/`afterEach` ONLY for cleanup that must run even if a test fails
 // Bad: mutable state, hidden setup
 let files: TableHelper;
 beforeEach(() => {
-	const workspace = createWorkspace({
-		id: 'test',
-		tables: { files: filesTable },
-		kv: {},
-	});
-	files = workspace.tables.files;
+  const workspace = createWorkspace({
+    id: "test",
+    tables: { files: filesTable },
+    kv: {},
+  });
+  files = workspace.tables.files;
 });
 
 // Good: setup function, immutable per-test
 function setup() {
-	const workspace = createWorkspace({
-		id: 'test',
-		tables: { files: filesTable },
-		kv: {},
-	});
-	return { files: workspace.tables.files };
+  const workspace = createWorkspace({
+    id: "test",
+    tables: { files: filesTable },
+    kv: {},
+  });
+  return { files: workspace.tables.files };
 }
 ```
 
@@ -144,18 +142,18 @@ Table definitions used across multiple tests should be defined at module level, 
 
 ```typescript
 const filesTable = defineTable({
-	id: field.string<FileId>(),
-	name: field.string(),
-	updatedAt: field.integer(),
+  id: field.string<FileId>(),
+  name: field.string(),
+  updatedAt: field.integer(),
 });
 
 function setup() {
-	const workspace = createWorkspace({
-		id: 'test',
-		tables: { files: filesTable },
-		kv: {},
-	});
-	return { files: workspace.tables.files };
+  const workspace = createWorkspace({
+    id: "test",
+    tables: { files: filesTable },
+    kv: {},
+  });
+  return { files: workspace.tables.files };
 }
 ```
 
@@ -168,13 +166,13 @@ Every property in the setup return should be used by at least one test. If no te
 ```typescript
 // Bad: ydoc is never destructured by any test
 function setup() {
-	const ydoc = new Y.Doc();
-	return { ydoc, tl: createTimeline(ydoc) };
+  const ydoc = new Y.Doc();
+  return { ydoc, tl: createTimeline(ydoc) };
 }
 
 // Good: only return what tests actually use
 function setup() {
-	return { tl: createTimeline(new Y.Doc()) };
+  return { tl: createTimeline(new Y.Doc()) };
 }
 ```
 

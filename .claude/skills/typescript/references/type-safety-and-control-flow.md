@@ -10,26 +10,18 @@ When `isFoo(x)` is asking "is this the specific thing my factory returned," use 
 // Smell: three coincidental properties stand in for identity.
 // Any object that happens to have ydoc + id + Symbol.dispose passes.
 function isWorkspaceHandle(value: unknown): value is WorkspaceHandle {
-	if (value == null || typeof value !== 'object') return false;
-	const record = value as Record<string | symbol, unknown>;
-	return (
-		'ydoc' in record &&
-		'id' in record &&
-		typeof record[Symbol.dispose] === 'function'
-	);
+  if (value == null || typeof value !== "object") return false;
+  const record = value as Record<string | symbol, unknown>;
+  return "ydoc" in record && "id" in record && typeof record[Symbol.dispose] === "function";
 }
 
 // Better: brand stamped by the factory, one check carries the intent.
 // Use `Symbol.for('<namespace>.<thing>')`, not `Symbol(...)`, so the brand
 // survives module duplication (see "Cross-package brands" below).
-export const WORKSPACE_HANDLE = Symbol.for('epicenter.workspace-handle');
+export const WORKSPACE_HANDLE = Symbol.for("epicenter.workspace-handle");
 
 function isWorkspaceHandle(value: unknown): value is WorkspaceHandle {
-	return (
-		value != null &&
-		typeof value === 'object' &&
-		WORKSPACE_HANDLE in value
-	);
+  return value != null && typeof value === "object" && WORKSPACE_HANDLE in value;
 }
 ```
 
@@ -41,10 +33,10 @@ Any brand that has to be recognized across a module boundary: CLI-walks-user-bun
 
 ```ts
 // Wrong: local reference; fails under module duplication
-export const ACTION_BRAND = Symbol('epicenter.action');
+export const ACTION_BRAND = Symbol("epicenter.action");
 
 // Right: registry-resolved; always the same reference
-export const ACTION_BRAND = Symbol.for('epicenter.action');
+export const ACTION_BRAND = Symbol.for("epicenter.action");
 ```
 
 Convention: namespace the key (`epicenter.action`, `epicenter.document-handle`), and centralize cross-package brand keys in one `brands.ts` per package so the duplication-safe identity set is visible and reviewable. The brand constant itself is an implementation detail: consumers import the `isX` guard, never the raw symbol.
@@ -53,9 +45,9 @@ Convention: namespace the key (`epicenter.action`, `epicenter.document-handle`),
 
 **This rule is narrow. It does NOT apply to:**
 
-- **Union narrowing via presence**: `'data' in result` / `'error' in result` on a wellcrafted `Result`, or `'error' in response` on an OAuth response union. The union *is* the contract; the presence check discriminates it.
+- **Union narrowing via presence**: `'data' in result` / `'error' in result` on a wellcrafted `Result`, or `'error' in response` on an OAuth response union. The union _is_ the contract; the presence check discriminates it.
 - **Discriminated union tags**: `switch (change.type)`. The tag is already a brand.
-- **Protocol / feature detection**: `Symbol.dispose in x`, `Symbol.asyncIterator in x`, `typeof x.then === 'function'`. These check *capability*, not identity.
+- **Protocol / feature detection**: `Symbol.dispose in x`, `Symbol.asyncIterator in x`, `typeof x.then === 'function'`. These check _capability_, not identity.
 - **Single-or-function config**: `typeof baseURL === 'function'` to distinguish a value from a getter. A config API pattern, not a broken contract.
 - **Node error inspection**: `'code' in error` on `NodeJS.ErrnoException`. Upstream type genuinely requires it.
 
@@ -153,6 +145,7 @@ type Config = {
 ```
 
 This applies to:
+
 - Object/type properties (`isActive: boolean`)
 - Getter methods (`get isEncrypted()`)
 - Local variables (`const isValid = ...`)
@@ -167,25 +160,25 @@ When multiple `if`/`else if` branches compare the same variable against string l
 
 ```typescript
 // Bad - if/else chain comparing the same variable
-if (change.action === 'add') {
-	handleAdd(change);
-} else if (change.action === 'update') {
-	handleUpdate(change);
-} else if (change.action === 'delete') {
-	handleDelete(change);
+if (change.action === "add") {
+  handleAdd(change);
+} else if (change.action === "update") {
+  handleUpdate(change);
+} else if (change.action === "delete") {
+  handleDelete(change);
 }
 
 // Good - switch statement
 switch (change.action) {
-	case 'add':
-		handleAdd(change);
-		break;
-	case 'update':
-		handleUpdate(change);
-		break;
-	case 'delete':
-		handleDelete(change);
-		break;
+  case "add":
+    handleAdd(change);
+    break;
+  case "update":
+    handleUpdate(change);
+    break;
+  case "delete":
+    handleDelete(change);
+    break;
 }
 ```
 
@@ -193,15 +186,15 @@ Use fall-through for cases that share logic:
 
 ```typescript
 switch (change.action) {
-	case 'add':
-	case 'update': {
-		applyChange(change);
-		break;
-	}
-	case 'delete': {
-		removeChange(change);
-		break;
-	}
+  case "add":
+  case "update": {
+    applyChange(change);
+    break;
+  }
+  case "delete": {
+    removeChange(change);
+    break;
+  }
 }
 ```
 
@@ -216,24 +209,24 @@ When switching over a **closed type**: a discriminated union, a defineErrors var
 ```typescript
 // Good: adding a new RpcError variant fails the build here
 switch (error.name) {
-	case 'ActionNotFound':
-		handleNotFound(error.action);
-		return;
-	case 'Timeout':
-		handleTimeout(error.ms);
-		return;
-	case 'PeerOffline':
-	case 'PeerLeft':
-		handleDisconnect();
-		return;
-	case 'ActionFailed':
-		handleFailure(error.cause);
-		return;
-	case 'Disconnected':
-		handleDisconnect();
-		return;
-	default:
-		error satisfies never;
+  case "ActionNotFound":
+    handleNotFound(error.action);
+    return;
+  case "Timeout":
+    handleTimeout(error.ms);
+    return;
+  case "PeerOffline":
+  case "PeerLeft":
+    handleDisconnect();
+    return;
+  case "ActionFailed":
+    handleFailure(error.cause);
+    return;
+  case "Disconnected":
+    handleDisconnect();
+    return;
+  default:
+    error satisfies never;
 }
 ```
 
@@ -269,18 +262,17 @@ When an expression maps a finite set of known values to outputs, use a `satisfie
 
 ```typescript
 // Bad - nested ternary
-const tooltip = status === 'connected'
-	? 'Connected'
-	: status === 'connecting'
-		? 'Connecting...'
-		: 'Offline';
+const tooltip =
+  status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Offline";
 
 // Good - record lookup with exhaustive type checking
-const tooltip = ({
-	connected: 'Connected',
-	connecting: 'Connecting...',
-	offline: 'Offline',
-} satisfies Record<SyncStatus, string>)[status];
+const tooltip = (
+  {
+    connected: "Connected",
+    connecting: "Connecting...",
+    offline: "Offline",
+  } satisfies Record<SyncStatus, string>
+)[status];
 ```
 
 `satisfies Record<SyncStatus, string>` gives you compile-time exhaustiveness: if `SyncStatus` gains a fourth value, TypeScript errors because the record is missing a key. Nested ternaries silently fall through to the else branch.
@@ -338,7 +330,7 @@ return {
 
 The narrow types weren't extracted from a wide one. They were composed bottom-up; the wide one stopped existing. Callers that need the wide union get it where the pieces meet (e.g., a coordinator that calls all four methods naturally lands on the union of every error its callees can produce).
 
-`Extract<>` is the right tool when the union is upstream and you can't redefine it: `Extract<keyof JSX.IntrinsicElements, 'div' | 'section'>`, `Extract<NodeJS.ErrnoException['code'], 'ENOENT' | 'EACCES'>`. The smell is when *you* defined the union and *you* are filtering it back down: that's a sign you owned the composition and composed it wrong.
+`Extract<>` is the right tool when the union is upstream and you can't redefine it: `Extract<keyof JSX.IntrinsicElements, 'div' | 'section'>`, `Extract<NodeJS.ErrnoException['code'], 'ENOENT' | 'EACCES'>`. The smell is when _you_ defined the union and _you_ are filtering it back down: that's a sign you owned the composition and composed it wrong.
 
 The test: do I own this union? If yes, split it. If no, `Extract<>` is fine.
 

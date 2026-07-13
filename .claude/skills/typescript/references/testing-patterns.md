@@ -1,6 +1,7 @@
 # Testing Patterns
 
 ## When to Read This
+
 Read this when writing TypeScript tests or deciding how to organize test files relative to source modules.
 
 # Inline Definitions in Tests
@@ -12,39 +13,36 @@ When a schema, builder, or configuration is only used once in a test, inline it 
 ### Bad Pattern (Extracted Variables)
 
 ```typescript
-test('builds a workspace bundle', () => {
-	const posts = defineTable({ id: field.string<PostId>(), title: field.string() });
+test("builds a workspace bundle", () => {
+  const posts = defineTable({ id: field.string<PostId>(), title: field.string() });
 
-	const theme = defineKv(Type.Union([Type.Literal('light'), Type.Literal('dark')]), () => 'light');
+  const theme = defineKv(Type.Union([Type.Literal("light"), Type.Literal("dark")]), () => "light");
 
-	const workspace = createWorkspace({
-		id: 'test-app',
-		tables: { posts },
-		kv: { theme },
-	});
+  const workspace = createWorkspace({
+    id: "test-app",
+    tables: { posts },
+    kv: { theme },
+  });
 
-	expect(workspace.ydoc.guid).toBe('test-app');
+  expect(workspace.ydoc.guid).toBe("test-app");
 });
 ```
 
 ### Good Pattern (Inlined)
 
 ```typescript
-test('builds a workspace bundle', () => {
-	const workspace = createWorkspace({
-		id: 'test-app',
-		tables: {
-			posts: defineTable({ id: field.string<PostId>(), title: field.string() }),
-		},
-		kv: {
-			theme: defineKv(
-				Type.Union([Type.Literal('light'), Type.Literal('dark')]),
-				() => 'light',
-			),
-		},
-	});
+test("builds a workspace bundle", () => {
+  const workspace = createWorkspace({
+    id: "test-app",
+    tables: {
+      posts: defineTable({ id: field.string<PostId>(), title: field.string() }),
+    },
+    kv: {
+      theme: defineKv(Type.Union([Type.Literal("light"), Type.Literal("dark")]), () => "light"),
+    },
+  });
 
-	expect(workspace.ydoc.guid).toBe('test-app');
+  expect(workspace.ydoc.guid).toBe("test-app");
 });
 ```
 

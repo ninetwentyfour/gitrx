@@ -15,8 +15,8 @@
 
 @media (prefers-color-scheme: dark) {
   .diff-viewer__body {
-    --diff-add-bg: rgba(60, 255, 130, 0.09);
-    --diff-del-bg: rgba(255, 80, 80, 0.1);
+    --diff-add-bg: rgba(167, 218, 30, 0.13);
+    --diff-del-bg: rgba(255, 0, 129, 0.14);
     background: #0a0a0d;
     color: #a9b1d6;
   }
@@ -24,13 +24,23 @@
   .diff-viewer__body .diff-line__gutter,
   .diff-viewer__body .diff-line[data-kind="noNewline"] .diff-line__gutter {
     background: #0d0d12;
-    color: #565f7a;
+    color: #565b80;
+  }
+
+  /* +/- markers in the signature add/del hues at 70% opacity (decorative,
+     aria-hidden), so they read as subtle accents over the near-black canvas. */
+  .diff-viewer__body .diff-line[data-kind="add"] .diff-line__marker {
+    color: rgba(167, 218, 30, 0.85);
+  }
+
+  .diff-viewer__body .diff-line[data-kind="del"] .diff-line__marker {
+    color: rgba(255, 0, 129, 0.85);
   }
 }
 
 :root[data-theme="dark"] .diff-viewer__body {
-  --diff-add-bg: rgba(60, 255, 130, 0.09);
-  --diff-del-bg: rgba(255, 80, 80, 0.1);
+  --diff-add-bg: rgba(167, 218, 30, 0.13);
+  --diff-del-bg: rgba(255, 0, 129, 0.14);
   background: #0a0a0d;
   color: #a9b1d6;
 }
@@ -38,13 +48,21 @@
 :root[data-theme="dark"] .diff-viewer__body .diff-line__gutter,
 :root[data-theme="dark"] .diff-viewer__body .diff-line[data-kind="noNewline"] .diff-line__gutter {
   background: #0d0d12;
-  color: #565f7a;
+  color: #565b80;
+}
+
+:root[data-theme="dark"] .diff-viewer__body .diff-line[data-kind="add"] .diff-line__marker {
+  color: rgba(167, 218, 30, 0.85);
+}
+
+:root[data-theme="dark"] .diff-viewer__body .diff-line[data-kind="del"] .diff-line__marker {
+  color: rgba(255, 0, 129, 0.85);
 }
 
 /* Explicit light override: keep App.css's light look even when the OS is dark. */
 :root[data-theme="light"] .diff-viewer__body {
-  --diff-add-bg: #e6ffec;
-  --diff-del-bg: #ffebe9;
+  --diff-add-bg: rgba(122, 160, 0, 0.1);
+  --diff-del-bg: rgba(209, 0, 104, 0.08);
   background: var(--color-bg);
   color: var(--color-text);
 }

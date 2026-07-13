@@ -3,10 +3,11 @@ name: rust-errors
 description: Rust to TypeScript error handling for Tauri apps. Use when mentioning Rust errors, Tauri command errors, invoke errors, or defining Rust error types for TS consumption.
 metadata:
   author: epicenter
-  version: '1.0'
+  version: "1.0"
 ---
 
 # Rust to TypeScript Error Handling
+
 ## Reference Repositories
 
 - [Tauri](https://github.com/tauri-apps/tauri): Desktop app framework (source of Rust-to-TypeScript error patterns)
@@ -64,55 +65,55 @@ enum ArchiveExtractionError {
 ### TypeScript Error Handling
 
 ```typescript
-import { type } from 'arktype';
+import { type } from "arktype";
 
 // Define the error type to match Rust serialization
 const TranscriptionErrorType = type({
-	name: "'AudioReadError' | 'GpuError' | 'ModelLoadError' | 'TranscriptionError'",
-	message: 'string',
+  name: "'AudioReadError' | 'GpuError' | 'ModelLoadError' | 'TranscriptionError'",
+  message: "string",
 });
 
 // Use in error handling
 const result = await tryAsync({
-	try: () => invoke('transcribe_audio_whisper', params),
-	catch: (unknownError) => {
-		const result = TranscriptionErrorType(unknownError);
-		if (result instanceof type.errors) {
-			// Handle unexpected error shape
-			return WhisperingErr({
-				title: 'Unexpected Error',
-				description: extractErrorMessage(unknownError),
-				action: { type: 'more-details', error: unknownError },
-			});
-		}
+  try: () => invoke("transcribe_audio_whisper", params),
+  catch: (unknownError) => {
+    const result = TranscriptionErrorType(unknownError);
+    if (result instanceof type.errors) {
+      // Handle unexpected error shape
+      return WhisperingErr({
+        title: "Unexpected Error",
+        description: extractErrorMessage(unknownError),
+        action: { type: "more-details", error: unknownError },
+      });
+    }
 
-		const error = result;
-		// Now we have properly typed discriminated union
-		switch (error.name) {
-			case 'ModelLoadError':
-				return WhisperingErr({
-					title: 'Model Loading Error',
-					description: error.message,
-					action: {
-						type: 'more-details',
-						error: new Error(error.message),
-					},
-				});
+    const error = result;
+    // Now we have properly typed discriminated union
+    switch (error.name) {
+      case "ModelLoadError":
+        return WhisperingErr({
+          title: "Model Loading Error",
+          description: error.message,
+          action: {
+            type: "more-details",
+            error: new Error(error.message),
+          },
+        });
 
-			case 'GpuError':
-				return WhisperingErr({
-					title: 'GPU Error',
-					description: error.message,
-					action: {
-						type: 'link',
-						label: 'Configure settings',
-						href: '/settings/transcription',
-					},
-				});
+      case "GpuError":
+        return WhisperingErr({
+          title: "GPU Error",
+          description: error.message,
+          action: {
+            type: "link",
+            label: "Configure settings",
+            href: "/settings/transcription",
+          },
+        });
 
-			// Handle other cases...
-		}
-	},
+      // Handle other cases...
+    }
+  },
 });
 ```
 
@@ -182,13 +183,13 @@ This pattern ensures clean, type-safe error handling across the Rust-TypeScript 
 
 ### Level mapping (5 levels, no `fatal`)
 
-| `tracing` macro | Workspace `Logger` method | Use when |
-|---|---|---|
-| `tracing::trace!(...)` | `log.trace(message, data?)` | Per-token / per-message noise for deep debugging |
-| `tracing::debug!(...)` | `log.debug(message, data?)` | Internal state transitions (handshakes, cache fills) |
-| `tracing::info!(...)` | `log.info(message, data?)` | Lifecycle events (connected, loaded, flushed) |
-| `tracing::warn!(?err)` | `log.warn(err)` | Recoverable failure: retry path, fallback taken |
-| `tracing::error!(?err)` | `log.error(err)` | Unrecoverable at this layer: call it loudly |
+| `tracing` macro         | Workspace `Logger` method   | Use when                                             |
+| ----------------------- | --------------------------- | ---------------------------------------------------- |
+| `tracing::trace!(...)`  | `log.trace(message, data?)` | Per-token / per-message noise for deep debugging     |
+| `tracing::debug!(...)`  | `log.debug(message, data?)` | Internal state transitions (handshakes, cache fills) |
+| `tracing::info!(...)`   | `log.info(message, data?)`  | Lifecycle events (connected, loaded, flushed)        |
+| `tracing::warn!(?err)`  | `log.warn(err)`             | Recoverable failure: retry path, fallback taken      |
+| `tracing::error!(?err)` | `log.error(err)`            | Unrecoverable at this layer: call it loudly          |
 
 `tracing` has no `fatal`; neither do we. Process termination is the app's decision (`process.exit`), not the library's.
 
@@ -202,7 +203,7 @@ tracing::error!(?err, "giving up");
 
 ```ts
 // TS: same rule
-log.warn(CacheError.Miss({ key }));  // recoverable
+log.warn(CacheError.Miss({ key })); // recoverable
 log.error(CacheError.Miss({ key })); // terminal
 ```
 
@@ -217,7 +218,7 @@ let result = do_thing().inspect_err(|err| tracing::warn!(?err, "do_thing failed"
 ```
 
 ```ts
-import { tapErr } from 'wellcrafted/result';
+import { tapErr } from "wellcrafted/result";
 
 const result = await tryAsync({
   try: () => doThing(),

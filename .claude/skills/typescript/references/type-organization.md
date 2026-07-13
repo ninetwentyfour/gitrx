@@ -1,6 +1,7 @@
 # Type Organization Patterns
 
 ## When to Read This
+
 Read this when deciding where types/constants live and how to name/derive option data structures.
 
 # Type Co-location Principles
@@ -60,24 +61,22 @@ If every type in a `types.ts` can be derived with `typeof`, `z.infer`, `InferTab
 When an exported type is the public handle returned by one `create*` factory, the factory return object is the source of truth.
 
 ```typescript
-export function createDisposableCache<
-	TId extends string | number,
-	TValue extends Disposable,
->(build: (id: TId) => TValue) {
-	return {
-		open(id: TId): TValue & Disposable {
-			// ...
-		},
-		has(id: TId): boolean {
-			// ...
-		},
-	};
+export function createDisposableCache<TId extends string | number, TValue extends Disposable>(
+  build: (id: TId) => TValue,
+) {
+  return {
+    open(id: TId): TValue & Disposable {
+      // ...
+    },
+    has(id: TId): boolean {
+      // ...
+    },
+  };
 }
 
-export type DisposableCache<
-	TId extends string | number,
-	TValue extends Disposable,
-> = ReturnType<typeof createDisposableCache<TId, TValue>>;
+export type DisposableCache<TId extends string | number, TValue extends Disposable> = ReturnType<
+  typeof createDisposableCache<TId, TValue>
+>;
 ```
 
 This is different from annotating the factory as `: DisposableCache<TId, TValue>`. The annotation checks the shape, but it also makes editor navigation prefer the named type. The derived alias keeps the public name while letting Go to Definition walk into the actual returned member.
@@ -99,7 +98,7 @@ Do not use it when the type is a shared contract implemented by multiple factori
 
 ## Inline vs Extract: The Hop Test
 
-The classic question, "is this used in multiple places?", only answers *whether* you could extract. It doesn't answer *whether you should*. The better question:
+The classic question, "is this used in multiple places?", only answers _whether_ you could extract. It doesn't answer _whether you should_. The better question:
 
 > **If a reader lands on the call site, do they get more out of seeing this inline, or out of jumping to another file?**
 
@@ -107,12 +106,12 @@ Extraction has a cost: every reader pays attention tax to context-switch into th
 
 ### Decision table
 
-| Situation | Action |
-|---|---|
-| Used in exactly 1 place | **Inline.** No DRY benefit exists. |
-| Used in many places, ≤5 lines, no independent name worth giving it | **Probably inline.** Hop > dupe. |
-| Used in many places, ≥10 lines OR has its own name/contract/tests | **Extract.** |
-| Public API surface, documented contract, or package boundary | **Always extract, even if trivial.** It *is* the contract. |
+| Situation                                                                  | Action                                                                                   |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Used in exactly 1 place                                                    | **Inline.** No DRY benefit exists.                                                       |
+| Used in many places, ≤5 lines, no independent name worth giving it         | **Probably inline.** Hop > dupe.                                                         |
+| Used in many places, ≥10 lines OR has its own name/contract/tests          | **Extract.**                                                                             |
+| Public API surface, documented contract, or package boundary               | **Always extract, even if trivial.** It _is_ the contract.                               |
 | Sits in a multi-purpose bucket file (`types.ts`, `utils.ts`, `helpers.ts`) | **Extract OUT of the bucket.** Co-locate with consumer or promote to its own named file. |
 
 ### Concrete examples from this codebase
@@ -151,11 +150,11 @@ Use when the label can be computed from the value:
 
 ```typescript
 // constants/audio/bitrate.ts
-export const BITRATES_KBPS = ['16', '32', '64', '128'] as const;
+export const BITRATES_KBPS = ["16", "32", "64", "128"] as const;
 
 export const BITRATE_OPTIONS = BITRATES_KBPS.map((bitrate) => ({
-	value: bitrate,
-	label: `${bitrate} kbps`,
+  value: bitrate,
+  label: `${bitrate} kbps`,
 }));
 ```
 
@@ -165,20 +164,17 @@ Use when labels need richer information than the value alone:
 
 ```typescript
 // constants/audio/sample-rate.ts
-export const SAMPLE_RATES = ['16000', '44100', '48000'] as const;
+export const SAMPLE_RATES = ["16000", "44100", "48000"] as const;
 
-const SAMPLE_RATE_METADATA: Record<
-	SampleRate,
-	{ shortLabel: string; description: string }
-> = {
-	'16000': { shortLabel: '16 kHz', description: 'Optimized for speech' },
-	'44100': { shortLabel: '44.1 kHz', description: 'CD quality' },
-	'48000': { shortLabel: '48 kHz', description: 'Studio quality' },
+const SAMPLE_RATE_METADATA: Record<SampleRate, { shortLabel: string; description: string }> = {
+  "16000": { shortLabel: "16 kHz", description: "Optimized for speech" },
+  "44100": { shortLabel: "44.1 kHz", description: "CD quality" },
+  "48000": { shortLabel: "48 kHz", description: "Studio quality" },
 };
 
 export const SAMPLE_RATE_OPTIONS = SAMPLE_RATES.map((rate) => ({
-	value: rate,
-	label: `${SAMPLE_RATE_METADATA[rate].shortLabel} - ${SAMPLE_RATE_METADATA[rate].description}`,
+  value: rate,
+  label: `${SAMPLE_RATE_METADATA[rate].shortLabel} - ${SAMPLE_RATE_METADATA[rate].description}`,
 }));
 ```
 
@@ -188,23 +184,23 @@ Use when options have extra fields beyond `value`/`label` (e.g., `icon`, `deskto
 
 ```typescript
 // constants/audio/recording-modes.ts
-export const RECORDING_MODES = ['manual', 'vad', 'upload'] as const;
+export const RECORDING_MODES = ["manual", "vad", "upload"] as const;
 export type RecordingMode = (typeof RECORDING_MODES)[number];
 
 export const RECORDING_MODE_OPTIONS = [
-	{ label: 'Manual', value: 'manual', icon: 'mic', desktopOnly: false },
-	{
-		label: 'Voice Activated',
-		value: 'vad',
-		icon: 'mic-voice',
-		desktopOnly: false,
-	},
-	{ label: 'Upload File', value: 'upload', icon: 'upload', desktopOnly: false },
+  { label: "Manual", value: "manual", icon: "mic", desktopOnly: false },
+  {
+    label: "Voice Activated",
+    value: "vad",
+    icon: "mic-voice",
+    desktopOnly: false,
+  },
+  { label: "Upload File", value: "upload", icon: "upload", desktopOnly: false },
 ] as const satisfies {
-	label: string;
-	value: RecordingMode;
-	icon: string;
-	desktopOnly: boolean;
+  label: string;
+  value: RecordingMode;
+  icon: string;
+  desktopOnly: boolean;
 }[];
 
 // Derive IDs for validation if needed

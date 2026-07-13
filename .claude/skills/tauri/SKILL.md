@@ -3,10 +3,11 @@ name: tauri
 description: Tauri commands, permissions, capabilities, security config, path handling, cross-platform file ops, and native filesystem APIs. Use when mentioning Tauri, desktop apps, Rust commands, invoke, capabilities, permissions, ResourceId, file paths, or platform differences.
 metadata:
   author: epicenter
-  version: '1.0'
+  version: "1.0"
 ---
 
 # Tauri Patterns
+
 ## Reference Repositories
 
 - [Tauri](https://github.com/tauri-apps/tauri): Desktop app framework with Rust backend and web frontend
@@ -125,11 +126,11 @@ Before choosing a path API, determine your execution context:
 ### Constructing Paths (Correct)
 
 ```typescript
-import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path';
+import { appLocalDataDir, dirname, join } from "@tauri-apps/api/path";
 
 // Join path segments; handles platform separators automatically
 const baseDir = await appLocalDataDir();
-const filePath = await join(baseDir, 'workspaces', workspaceId, 'data.json');
+const filePath = await join(baseDir, "workspaces", workspaceId, "data.json");
 
 // Get parent directory; cleaner than manual slicing
 const parentDir = await dirname(filePath);
@@ -142,7 +143,7 @@ For human-readable log output, hardcoded `/` is acceptable since it's not used f
 
 ```typescript
 // OK for logging; consistent cross-platform log output
-const logPath = pathSegments.join('/');
+const logPath = pathSegments.join("/");
 console.log(`[Persistence] Loading from ${logPath}`);
 ```
 
@@ -152,13 +153,13 @@ console.log(`[Persistence] Loading from ${logPath}`);
 
 ```typescript
 // BAD: Hardcoded separator breaks on Windows
-const filePath = baseDir + '/' + 'workspaces' + '/' + id;
+const filePath = baseDir + "/" + "workspaces" + "/" + id;
 
 // BAD: Template literal with hardcoded separator
 const filePath = `${baseDir}/workspaces/${id}`;
 
 // GOOD: Use join()
-const filePath = await join(baseDir, 'workspaces', id);
+const filePath = await join(baseDir, "workspaces", id);
 ```
 
 ### Never: Manual Parent Directory Extraction
@@ -176,17 +177,17 @@ const parentDir = await dirname(filePath);
 
 ```typescript
 // BAD: Windows uses backslashes
-const configPath = appDir + '/config.json';
+const configPath = appDir + "/config.json";
 
 // GOOD: Platform-agnostic
-const configPath = await join(appDir, 'config.json');
+const configPath = await join(appDir, "config.json");
 ```
 
 ### Never: Assuming Path Format
 
 ```typescript
 // BAD: Splitting on '/' fails on Windows paths
-const parts = filePath.split('/');
+const parts = filePath.split("/");
 
 // GOOD: Use dirname/basename for extraction
 const dir = await dirname(filePath);
@@ -199,15 +200,15 @@ Always import from `@tauri-apps/api/path`:
 
 ```typescript
 import {
-	appLocalDataDir,
-	dirname,
-	join,
-	basename,
-	extname,
-	normalize,
-	resolve,
-	sep,
-} from '@tauri-apps/api/path';
+  appLocalDataDir,
+  dirname,
+  join,
+  basename,
+  extname,
+  normalize,
+  resolve,
+  sep,
+} from "@tauri-apps/api/path";
 ```
 
 ## Note on Async
@@ -216,7 +217,7 @@ Most Tauri path helpers are async because they communicate with the Rust backend
 
 ```typescript
 const baseDir = await appLocalDataDir();
-const filePath = await join(baseDir, 'file.txt');
+const filePath = await join(baseDir, "file.txt");
 const parent = await dirname(filePath);
 const separator = sep();
 ```
@@ -226,18 +227,18 @@ const separator = sep();
 Use `@tauri-apps/plugin-fs` for file operations, combined with Tauri path APIs:
 
 ```typescript
-import { appLocalDataDir, dirname, join } from '@tauri-apps/api/path';
-import { mkdir, readFile, writeFile } from '@tauri-apps/plugin-fs';
+import { appLocalDataDir, dirname, join } from "@tauri-apps/api/path";
+import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 
 async function saveData(segments: string[], data: Uint8Array) {
-	const baseDir = await appLocalDataDir();
-	const filePath = await join(baseDir, ...segments);
+  const baseDir = await appLocalDataDir();
+  const filePath = await join(baseDir, ...segments);
 
-	// Ensure parent directory exists
-	const parentDir = await dirname(filePath);
-	await mkdir(parentDir, { recursive: true });
+  // Ensure parent directory exists
+  const parentDir = await dirname(filePath);
+  await mkdir(parentDir, { recursive: true });
 
-	await writeFile(filePath, data);
+  await writeFile(filePath, data);
 }
 ```
 

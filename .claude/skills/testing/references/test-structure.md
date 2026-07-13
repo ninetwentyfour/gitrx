@@ -45,14 +45,14 @@ When tests need different setup scenarios, use named setup variants (not nested 
 ```typescript
 // Good — composable setup functions
 function setupWithFiles() {
-	const { files } = setup();
-	files.set(makeRow('f1', 'test.txt'));
-	files.set(makeRow('f2', 'other.txt'));
-	return { files };
+  const { files } = setup();
+  files.set(makeRow("f1", "test.txt"));
+  files.set(makeRow("f2", "other.txt"));
+  return { files };
 }
 
-test('lists all files', () => {
-	const { files } = setupWithFiles();
-	expect(files.count()).toBe(2);
+test("lists all files", () => {
+  const { files } = setupWithFiles();
+  expect(files.count()).toBe(2);
 });
 ```

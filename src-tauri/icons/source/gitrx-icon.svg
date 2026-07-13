@@ -1,0 +1,89 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Subtle synthwave-horizon vertical gradient for the squircle -->
+    <linearGradient id="bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0c0a20"/>
+      <stop offset="0.55" stop-color="#0a0912"/>
+      <stop offset="1" stop-color="#0a0a0d"/>
+    </linearGradient>
+
+    <!-- Soft neon outer glow -->
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDev="11"/>
+    </filter>
+    <filter id="glowBig" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDev="20"/>
+    </filter>
+
+    <!-- Rounded-rect squircle used both as fill and as a clip so glow stays inside -->
+    <rect id="squircle" x="100" y="100" width="824" height="824" rx="188" ry="188"/>
+    <clipPath id="squircleClip">
+      <use href="#squircle"/>
+    </clipPath>
+  </defs>
+
+  <!-- Squircle background -->
+  <use href="#squircle" fill="url(#bg)"/>
+
+  <g clip-path="url(#squircleClip)">
+    <!-- ============ NEON COMMIT GRAPH ============ -->
+    <!-- Trunk path (magenta), branch path (cyan). Node centers:
+         HEAD (top trunk)  = (382, 274)  larger
+         bottom trunk node = (382, 750)
+         branch node       = (600, 512) on the vertical lane
+         Branch: exits the bottom node with a vertical-tangent S-curve into a
+         vertical lane at x=600 (parallel to the trunk), then S-curves back and
+         merges tangentially into the trunk at (382,340), just below HEAD.
+         Vertical tangents everywhere = git-GUI connector look, no letterform.
+         Draw order: glows, then branch tube+core, then trunk tube+core so the
+         trunk cleanly overlays the branch at both junctions. -->
+
+    <!-- Wide ambient bloom so the sign feels lit -->
+    <g opacity="0.34" filter="url(#glowBig)">
+      <path d="M382 274 L382 750" stroke="#fc28a8" stroke-width="32" fill="none" stroke-linecap="round"/>
+      <path d="M382 750 C382 702 600 702 600 655 L600 435 C600 388 382 388 382 340"
+            stroke="#16f1fc" stroke-width="30" fill="none" stroke-linecap="round"/>
+      <circle cx="382" cy="274" r="44" fill="#fc28a8"/>
+      <circle cx="382" cy="750" r="32" fill="#fc28a8"/>
+      <circle cx="600" cy="512" r="32" fill="#16f1fc"/>
+    </g>
+
+    <!-- Tight outer glow (line-colored) -->
+    <g opacity="0.6" filter="url(#glow)">
+      <path d="M382 274 L382 750" stroke="#fc28a8" stroke-width="28" fill="none" stroke-linecap="round"/>
+      <path d="M382 750 C382 702 600 702 600 655 L600 435 C600 388 382 388 382 340"
+            stroke="#16f1fc" stroke-width="26" fill="none" stroke-linecap="round"/>
+      <circle cx="382" cy="274" r="39" fill="#fc28a8"/>
+      <circle cx="382" cy="750" r="28" fill="#fc28a8"/>
+      <circle cx="600" cy="512" r="28" fill="#16f1fc"/>
+    </g>
+
+    <!-- Branch tube + core (drawn first so the trunk overlays the junctions) -->
+    <g fill="none" stroke-linecap="round">
+      <path d="M382 750 C382 702 600 702 600 655 L600 435 C600 388 382 388 382 340"
+            stroke="#16f1fc" stroke-width="24"/>
+      <path d="M382 750 C382 702 600 702 600 655 L600 435 C600 388 382 388 382 340"
+            stroke="#e2feff" stroke-width="7" opacity="0.7"/>
+    </g>
+
+    <!-- Trunk tube + core -->
+    <g fill="none" stroke-linecap="round">
+      <path d="M382 274 L382 750" stroke="#fc28a8" stroke-width="26"/>
+      <path d="M382 274 L382 750" stroke="#ffe6f7" stroke-width="7.5" opacity="0.7"/>
+    </g>
+
+    <!-- Nodes: solid fill + bright inner highlight. Top trunk node is HEAD (larger). -->
+    <!-- HEAD -->
+    <circle cx="382" cy="274" r="37" fill="#fc28a8"/>
+    <circle cx="382" cy="274" r="17" fill="#ffe6f7" opacity="0.92"/>
+    <!-- bottom trunk node -->
+    <circle cx="382" cy="750" r="26" fill="#fc28a8"/>
+    <circle cx="382" cy="750" r="11" fill="#ffe6f7" opacity="0.92"/>
+    <!-- branch node -->
+    <circle cx="600" cy="512" r="26" fill="#16f1fc"/>
+    <circle cx="600" cy="512" r="11" fill="#e2feff" opacity="0.92"/>
+  </g>
+
+  <!-- Subtle lighter inner border so the tile reads against dark Docks -->
+  <use href="#squircle" fill="none" stroke="rgba(121,132,209,0.25)" stroke-width="1.5"/>
+</svg>
