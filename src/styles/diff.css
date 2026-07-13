@@ -1,0 +1,135 @@
+/*
+ * Diff-viewer polish styles (additive to App.css).
+ *
+ * Dark mode paints the diff body like the user's TokyoWhale editor: a near-black
+ * (#0a0a0d) canvas with #a9b1d6 default text, and TRANSLUCENT add/del row
+ * overlays so the near-black background — and the syntax colours layered on top —
+ * read through. Light mode keeps App.css's existing (one-light-friendly) look.
+ *
+ * The dark treatment applies both under the OS `prefers-color-scheme: dark`
+ * media query AND an explicit `:root[data-theme="dark"]` (the manual toggle),
+ * with `data-theme` winning over the media query.
+ */
+
+/* ---------- Dark: TokyoWhale canvas + translucent overlays ---------- */
+
+@media (prefers-color-scheme: dark) {
+  .diff-viewer__body {
+    --diff-add-bg: rgba(60, 255, 130, 0.09);
+    --diff-del-bg: rgba(255, 80, 80, 0.1);
+    background: #0a0a0d;
+    color: #a9b1d6;
+  }
+
+  .diff-viewer__body .diff-line__gutter,
+  .diff-viewer__body .diff-line[data-kind="noNewline"] .diff-line__gutter {
+    background: #0d0d12;
+    color: #565f7a;
+  }
+}
+
+:root[data-theme="dark"] .diff-viewer__body {
+  --diff-add-bg: rgba(60, 255, 130, 0.09);
+  --diff-del-bg: rgba(255, 80, 80, 0.1);
+  background: #0a0a0d;
+  color: #a9b1d6;
+}
+
+:root[data-theme="dark"] .diff-viewer__body .diff-line__gutter,
+:root[data-theme="dark"] .diff-viewer__body .diff-line[data-kind="noNewline"] .diff-line__gutter {
+  background: #0d0d12;
+  color: #565f7a;
+}
+
+/* Explicit light override: keep App.css's light look even when the OS is dark. */
+:root[data-theme="light"] .diff-viewer__body {
+  --diff-add-bg: #e6ffec;
+  --diff-del-bg: #ffebe9;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* ---------- Rename affordance (toolbar) ---------- */
+
+.diff-viewer__rename {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ---------- Binary file whole-file actions ---------- */
+
+.diff-viewer__binary {
+  padding: 16px 12px;
+}
+
+.diff-viewer__binary .diff-viewer__notice {
+  padding: 0;
+}
+
+.diff-viewer__binary-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/* Centered image preview on a subtle checkerboard so transparency is legible. */
+.diff-viewer__image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  background-image:
+    linear-gradient(45deg, var(--color-surface-alt) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--color-surface-alt) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-surface-alt) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--color-surface-alt) 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+
+.diff-viewer__image-el {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ---------- Virtualized diff (>2000 lines) ---------- */
+
+.diff-viewer__content--virtual {
+  min-width: max-content;
+}
+
+.diff-viewer__vrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  min-width: max-content;
+}
+
+/*
+ * VERTICAL sticky headers fight an absolutely positioned virtual list (the
+ * header would pin relative to the transformed row, not the scroll port) and
+ * misbehave under WKWebView, so headers render statically in virtualized mode —
+ * the accepted trade-off for very large diffs.
+ *
+ * HORIZONTAL pinning of the range/actions (App.css: sticky left / right) still
+ * works here: their scroll container is `.diff-viewer__body`, so the row's
+ * `translateY` transform does not affect their horizontal stickiness.
+ */
+.diff-viewer__content--virtual .hunk__header {
+  position: static;
+}

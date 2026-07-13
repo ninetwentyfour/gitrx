@@ -1,0 +1,885 @@
+:root {
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Surfaces */
+  --color-bg: #f6f6f7;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f0f0f2;
+  --color-border: #d9d9de;
+  --color-border-strong: #c2c2c9;
+
+  /* Text */
+  --color-text: #1c1c1e;
+  --color-text-muted: #6b6b73;
+
+  /* Accent / interaction */
+  --color-accent: #2f6fed;
+  --color-accent-fg: #ffffff;
+  --color-selection: #dbe7ff;
+
+  /* Status */
+  --status-modified: #b57a00;
+  --status-modified-bg: #fbeecb;
+  --status-added: #1f8a44;
+  --status-added-bg: #d8f0df;
+  --status-deleted: #c02626;
+  --status-deleted-bg: #f7d9d9;
+  --status-renamed: #2f6fed;
+  --status-renamed-bg: #dbe7ff;
+  --status-conflicted: #d9531e;
+  --status-conflicted-bg: #fbe0d1;
+
+  --diff-add: #1f8a44;
+  --diff-del: #c02626;
+
+  /* Diff row backgrounds (softened GitHub/GitX tones) */
+  --diff-add-bg: #e6ffec;
+  --diff-del-bg: #ffebe9;
+  --diff-add-fg: #0a5c2b;
+  --diff-del-fg: #8a1a1a;
+  --diff-hunk-bg: #eef1f5;
+  /* Translucent copy of --diff-hunk-bg for the sticky pinned hunk range/actions
+     so overlapping header text can't read through, matched to the header bg. */
+  --diff-hunk-pin-bg: rgba(238, 241, 245, 0.9);
+  --diff-gutter-fg: #8a8a92;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The base :root above is the light palette (the no-attribute / system-light
+   case). The media query supplies dark values for the no-attribute /
+   system-dark case. The `:root[data-theme="…"]` blocks below override BOTH
+   regardless of the media query (higher specificity: [attr] beats bare :root),
+   so an explicit theme choice always wins. Palette values are duplicated from
+   the two sources above verbatim — do not diverge them. */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1c1c1e;
+    --color-surface: #242426;
+    --color-surface-alt: #2c2c2e;
+    --color-border: #3a3a3d;
+    --color-border-strong: #48484c;
+
+    --color-text: #f2f2f4;
+    --color-text-muted: #9a9aa2;
+
+    --color-accent: #4c8dff;
+    --color-accent-fg: #ffffff;
+    --color-selection: #2a3d5e;
+
+    --status-modified: #e0a83a;
+    --status-modified-bg: #40350f;
+    --status-added: #5cc47b;
+    --status-added-bg: #143a20;
+    --status-deleted: #f06d6d;
+    --status-deleted-bg: #3d1616;
+    --status-renamed: #6ba0ff;
+    --status-renamed-bg: #16294a;
+    --status-conflicted: #ff8a52;
+    --status-conflicted-bg: #3d2011;
+
+    --diff-add: #5cc47b;
+    --diff-del: #f06d6d;
+
+    --diff-add-bg: #12261e;
+    --diff-del-bg: #301a1c;
+    --diff-add-fg: #7ee2a0;
+    --diff-del-fg: #ff9e9e;
+    --diff-hunk-bg: #2c2c2e;
+    --diff-hunk-pin-bg: rgba(44, 44, 46, 0.9);
+    --diff-gutter-fg: #7a7a82;
+  }
+}
+
+/* Explicit light choice — wins over a dark system preference. */
+:root[data-theme="light"] {
+  --color-bg: #f6f6f7;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f0f0f2;
+  --color-border: #d9d9de;
+  --color-border-strong: #c2c2c9;
+
+  --color-text: #1c1c1e;
+  --color-text-muted: #6b6b73;
+
+  --color-accent: #2f6fed;
+  --color-accent-fg: #ffffff;
+  --color-selection: #dbe7ff;
+
+  --status-modified: #b57a00;
+  --status-modified-bg: #fbeecb;
+  --status-added: #1f8a44;
+  --status-added-bg: #d8f0df;
+  --status-deleted: #c02626;
+  --status-deleted-bg: #f7d9d9;
+  --status-renamed: #2f6fed;
+  --status-renamed-bg: #dbe7ff;
+  --status-conflicted: #d9531e;
+  --status-conflicted-bg: #fbe0d1;
+
+  --diff-add: #1f8a44;
+  --diff-del: #c02626;
+
+  --diff-add-bg: #e6ffec;
+  --diff-del-bg: #ffebe9;
+  --diff-add-fg: #0a5c2b;
+  --diff-del-fg: #8a1a1a;
+  --diff-hunk-bg: #eef1f5;
+  /* Translucent copy of --diff-hunk-bg for the sticky pinned hunk range/actions
+     so overlapping header text can't read through, matched to the header bg. */
+  --diff-hunk-pin-bg: rgba(238, 241, 245, 0.9);
+  --diff-gutter-fg: #8a8a92;
+}
+
+/* Explicit dark choice — wins over a light system preference. */
+:root[data-theme="dark"] {
+  --color-bg: #1c1c1e;
+  --color-surface: #242426;
+  --color-surface-alt: #2c2c2e;
+  --color-border: #3a3a3d;
+  --color-border-strong: #48484c;
+
+  --color-text: #f2f2f4;
+  --color-text-muted: #9a9aa2;
+
+  --color-accent: #4c8dff;
+  --color-accent-fg: #ffffff;
+  --color-selection: #2a3d5e;
+
+  --status-modified: #e0a83a;
+  --status-modified-bg: #40350f;
+  --status-added: #5cc47b;
+  --status-added-bg: #143a20;
+  --status-deleted: #f06d6d;
+  --status-deleted-bg: #3d1616;
+  --status-renamed: #6ba0ff;
+  --status-renamed-bg: #16294a;
+  --status-conflicted: #ff8a52;
+  --status-conflicted-bg: #3d2011;
+
+  --diff-add: #5cc47b;
+  --diff-del: #f06d6d;
+
+  --diff-add-bg: #12261e;
+  --diff-del-bg: #301a1c;
+  --diff-add-fg: #7ee2a0;
+  --diff-del-fg: #ff9e9e;
+  --diff-hunk-bg: #2c2c2e;
+  --diff-hunk-pin-bg: rgba(44, 44, 46, 0.9);
+  --diff-gutter-fg: #7a7a82;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- No-repo state ---------- */
+
+.no-repo {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.no-repo__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 48px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  text-align: center;
+  max-width: 420px;
+}
+
+.no-repo__title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.no-repo__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.no-repo__open {
+  margin-top: 8px;
+  padding: 8px 18px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--color-accent-fg);
+  background: var(--color-accent);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.no-repo__open:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- Repo view ---------- */
+
+.repo-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.repo-view__body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.repo-view__diff,
+.repo-view__bottom {
+  min-height: 0;
+}
+
+/* ---------- Header bar ---------- */
+
+.header-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 44px;
+  padding: 0 14px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.header-bar__title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.header-bar__repo {
+  font-weight: 600;
+}
+
+.header-bar__sep {
+  color: var(--color-text-muted);
+}
+
+.header-bar__branch {
+  color: var(--color-text-muted);
+}
+
+.header-bar__slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ---------- Theme toggle ---------- */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.theme-toggle__glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.theme-toggle__label {
+  font-variant-numeric: tabular-nums;
+}
+
+.context-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.context-slider__label {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.context-slider input[type="range"] {
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* ---------- Toasts ---------- */
+
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--status-deleted);
+  background: var(--status-deleted-bg);
+  border: 1px solid var(--status-deleted);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.toast:hover {
+  filter: brightness(0.97);
+}
+
+.toast__message {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Resize handles ---------- */
+
+.resize-handle {
+  background: var(--color-border);
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle[data-resizing="true"] {
+  background: var(--color-accent);
+}
+
+.resize-handle--horizontal {
+  height: 6px;
+}
+
+.resize-handle--vertical {
+  width: 6px;
+}
+
+/* ---------- Diff viewer ---------- */
+
+.diff-viewer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-bg);
+}
+
+.diff-viewer--empty {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.diff-viewer__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.diff-viewer__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-viewer__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.diff-viewer__loading {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.diff-viewer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.diff-viewer__notice {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-style: italic;
+}
+
+/* Content sizes to the widest row so every row shares a common width and the
+   whole diff scrolls horizontally as one unit. */
+.diff-viewer__content {
+  min-width: max-content;
+}
+
+/* ---------- Hunk ---------- */
+
+.hunk__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 12px 2px 8px;
+  color: var(--color-text-muted);
+  background: var(--diff-hunk-bg);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The @@ range text pins to the LEFT scroll edge so the hunk stays identifiable
+   while wide code lines scroll the header horizontally. A backdrop matched to the
+   header keeps it legible if the pinned action group ever overlaps it. */
+.hunk__range {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+  background: var(--diff-hunk-pin-bg);
+}
+
+/* The action buttons pin to the RIGHT scroll edge (a small inset from the
+   window) so Stage/Discard/Unstage never scroll out of view on wide diffs. The
+   translucent backdrop (over the opaque header bg) hides any text behind it, and
+   the higher z-index keeps the group above the sticky range text on overlap.
+   Sticky works on these flex children because their scroll container is
+   `.diff-viewer__body`, independent of the flex layout and — in VirtualDiff — of
+   the row's vertical transform, so horizontal pinning holds in both render
+   modes. */
+.hunk__actions {
+  position: sticky;
+  right: 8px;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 6px;
+  padding-left: 8px;
+  background: var(--diff-hunk-pin-bg);
+}
+
+.hunk__btn {
+  padding: 1px 8px;
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.hunk__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- Diff line row ---------- */
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.5rem 3.5rem 1.25rem 1fr;
+}
+
+.diff-line__gutter {
+  padding: 0 6px;
+  text-align: right;
+  color: var(--diff-gutter-fg);
+  background: var(--color-surface);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-line__marker {
+  text-align: center;
+  user-select: none;
+}
+
+.diff-line__code {
+  padding-right: 12px;
+  white-space: pre;
+}
+
+.diff-line[data-kind="add"] {
+  background: var(--diff-add-bg);
+}
+
+.diff-line[data-kind="add"] .diff-line__marker,
+.diff-line[data-kind="add"] .diff-line__code {
+  color: var(--diff-add-fg);
+}
+
+.diff-line[data-kind="add"] .diff-line__gutter {
+  color: var(--diff-add-fg);
+  background: color-mix(in srgb, var(--diff-add-bg) 82%, black 6%);
+}
+
+.diff-line[data-kind="del"] {
+  background: var(--diff-del-bg);
+}
+
+.diff-line[data-kind="del"] .diff-line__marker,
+.diff-line[data-kind="del"] .diff-line__code {
+  color: var(--diff-del-fg);
+}
+
+.diff-line[data-kind="del"] .diff-line__gutter {
+  color: var(--diff-del-fg);
+  background: color-mix(in srgb, var(--diff-del-bg) 82%, black 6%);
+}
+
+.diff-line[data-kind="noNewline"] {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.diff-line[data-kind="noNewline"] .diff-line__gutter {
+  background: var(--color-surface);
+}
+
+/* ---------- Staging (bottom) ---------- */
+
+.staging {
+  height: 100%;
+  min-height: 0;
+}
+
+.staging__pane {
+  min-width: 0;
+  background: var(--color-surface);
+}
+
+/* ---------- Commit panel ---------- */
+
+.commit-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--color-surface-alt);
+}
+
+.commit-panel__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.commit-panel__message {
+  flex: 1 1 auto;
+  min-height: 0;
+  resize: none;
+  padding: 8px;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.commit-panel__message:disabled {
+  opacity: 0.7;
+}
+
+.commit-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commit-panel__amend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+}
+
+.commit-panel__commit {
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--color-accent-fg);
+  background: var(--color-accent);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.commit-panel__commit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- File list ---------- */
+
+.file-list {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-list__title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file-list__count {
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.file-list__empty {
+  margin: 0;
+  padding: 16px 10px;
+  color: var(--color-text-muted);
+}
+
+.file-list__items {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+/* ---------- File row ---------- */
+
+.file-row {
+  position: relative;
+  margin: 0;
+}
+
+.file-row__btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--color-text);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.file-row__btn:hover {
+  background: var(--color-surface-alt);
+}
+
+.file-row__btn.is-selected {
+  background: var(--color-selection);
+  border-color: var(--color-accent);
+}
+
+/* Merge a contiguous run of selected rows into one block: collapse the interior
+   accent borders (a transparent border keeps the selection background flush, so
+   neighbours' 1px edges don't double up) and drop the interior rounded corners.
+   Only the run's top edge (first selected) and bottom edge (last selected) keep
+   their border + radius. Uses :has() (supported in WKWebView). */
+.file-row:has(.is-selected) + .file-row .is-selected {
+  border-top-color: transparent;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.file-row:has(+ .file-row .is-selected) .is-selected {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.status-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+}
+
+.status-badge--modified {
+  color: var(--status-modified);
+  background: var(--status-modified-bg);
+}
+
+.status-badge--added,
+.status-badge--untracked {
+  color: var(--status-added);
+  background: var(--status-added-bg);
+}
+
+.status-badge--deleted {
+  color: var(--status-deleted);
+  background: var(--status-deleted-bg);
+}
+
+.status-badge--renamed {
+  color: var(--status-renamed);
+  background: var(--status-renamed-bg);
+}
+
+.status-badge--conflicted {
+  color: var(--status-conflicted);
+  background: var(--status-conflicted-bg);
+}
+
+.status-badge--typechange {
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+}
+
+/* Truncate the START of long paths, keep the filename visible. The container is
+   RTL so the ellipsis clips the start; the inner text uses `plaintext` bidi so
+   the path's own characters keep logical order (a leading dot stays leading). */
+.file-row__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--font-mono);
+}
+
+.file-row__path-text {
+  unicode-bidi: plaintext;
+}
+
+.file-row__stat {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.file-row__add {
+  color: var(--diff-add);
+}
+
+.file-row__del {
+  color: var(--diff-del);
+}
+
+.file-row__stat--binary {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
