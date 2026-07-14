@@ -206,6 +206,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn rejects_workdir_symlink() {
         // A symlink in the working tree (even one that resolves to a real image)
