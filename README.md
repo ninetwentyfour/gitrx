@@ -9,7 +9,7 @@ Hunk-level git staging for macOS.
 [![CI](https://github.com/ninetwentyfour/gitrx/actions/workflows/ci.yml/badge.svg)](https://github.com/ninetwentyfour/gitrx/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/ninetwentyfour/gitrx)](../../releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform: macOS (Apple Silicon)](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey)
+![Platform: macOS (Apple Silicon)](<https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey>)
 
 Built with Tauri 2 · Rust · React · bun
 
