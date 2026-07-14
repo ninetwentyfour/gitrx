@@ -4,6 +4,21 @@ on:
   push:
     tags:
       - "v*"
+  # Reusable entry point: auto-release.yml calls this in the SAME run after it
+  # bumps + tags on green master. A tag pushed by the bot's GITHUB_TOKEN would
+  # NOT trigger this workflow on its own (default-token pushes never fan out to
+  # other workflows), so the auto flow invokes us directly via workflow_call.
+  workflow_call:
+    inputs:
+      tagName:
+        description: "Tag to build and release (e.g. v0.2.6). Required for workflow_call."
+        required: true
+        type: string
+      publish:
+        description: "Publish the release (true) instead of leaving it a draft (false)."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   release:
@@ -32,7 +47,11 @@ jobs:
     continue-on-error: ${{ matrix.platform == 'windows-latest' }}
 
     steps:
+      # Build the exact tagged commit. On a manual tag push this is refs/tags/v*
+      # (github.ref); on a workflow_call the caller passes the freshly created tag.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tagName || github.ref }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -53,8 +72,10 @@ jobs:
           # Default token — sufficient for creating a release in this same repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ inputs.tagName || github.ref_name }}
           releaseName: "gitrx v__VERSION__"
-          releaseDraft: true
+          # Manual tag pushes stay drafts; an auto-release call with publish=true
+          # publishes. (!null -> true, so the push path defaults to a draft.)
+          releaseDraft: ${{ !inputs.publish }}
           prerelease: false
           args: ${{ matrix.args }}
