@@ -66,6 +66,33 @@ describe("FileRow", () => {
     },
   );
 
+  it("carries the untracked distinguishing class only for untracked entries", () => {
+    const { rerender } = render(
+      <FileRow
+        entry={makeEntry({ path: "u.txt", status: "untracked" })}
+        selected={false}
+        onSelect={() => {}}
+        onActivate={() => {}}
+        onContextMenu={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /u\.txt/ })).toHaveClass("file-row__btn--untracked");
+
+    // A tracked (modified) entry must NOT carry the class.
+    rerender(
+      <FileRow
+        entry={makeEntry({ path: "m.txt", status: "modified" })}
+        selected={false}
+        onSelect={() => {}}
+        onActivate={() => {}}
+        onContextMenu={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /m\.txt/ })).not.toHaveClass(
+      "file-row__btn--untracked",
+    );
+  });
+
   it("renders a renamed path as old → new", () => {
     const { container } = renderRow(
       makeEntry({ status: "renamed", oldPath: "old/name.txt", path: "new/name.txt" }),

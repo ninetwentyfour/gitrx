@@ -144,8 +144,18 @@ pub fn build_status(repo: &Repository) -> AppResult<RepoStatus> {
         }
     }
 
+    // Staged entries never include untracked files, so a plain path sort suffices.
     staged.sort_by(|a, b| a.path.cmp(&b.path));
-    unstaged.sort_by(|a, b| a.path.cmp(&b.path));
+    // Unstaged: untracked (new) files sort to the bottom as a distinct group. The
+    // key is `(is_untracked, path)` — `false < true`, so tracked entries come first,
+    // then untracked, each alphabetical within its own group.
+    unstaged.sort_by(|a, b| {
+        let a_untracked = a.status == FileStatus::Untracked;
+        let b_untracked = b.status == FileStatus::Untracked;
+        a_untracked
+            .cmp(&b_untracked)
+            .then_with(|| a.path.cmp(&b.path))
+    });
 
     Ok(RepoStatus {
         repo_name,
@@ -428,6 +438,36 @@ mod tests {
 
         // b.txt must NOT appear unstaged (workdir == index).
         assert!(status.unstaged.iter().all(|e| e.path != "b.txt"));
+    }
+
+    #[test]
+    fn unstaged_sorts_tracked_before_untracked_each_alphabetical() {
+        let dir = tempdir().unwrap();
+        let repo = init_repo(dir.path());
+        // Baseline commits two tracked files (a.txt, b.txt).
+        commit_baseline(&repo, dir.path());
+
+        // Modify both tracked files so they appear unstaged, out of alpha order on
+        // disk-write order to prove the sort — write b before a intentionally.
+        fs::write(dir.path().join("b.txt"), "b1\nb2\n").unwrap();
+        fs::write(dir.path().join("a.txt"), "line1\nline2\nline3\n").unwrap();
+
+        // Two untracked files, again written out of order (z before m) to prove the
+        // within-group alphabetical sort.
+        fs::write(dir.path().join("z.txt"), "z\n").unwrap();
+        fs::write(dir.path().join("m.txt"), "m\n").unwrap();
+
+        let status = build_status(&repo).unwrap();
+
+        // Tracked (alphabetical) first, then untracked (alphabetical).
+        let paths: Vec<&str> = status.unstaged.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.txt", "b.txt", "m.txt", "z.txt"]);
+
+        // The first two are tracked (Modified), the last two untracked.
+        assert_eq!(status.unstaged[0].status, FileStatus::Modified);
+        assert_eq!(status.unstaged[1].status, FileStatus::Modified);
+        assert_eq!(status.unstaged[2].status, FileStatus::Untracked);
+        assert_eq!(status.unstaged[3].status, FileStatus::Untracked);
     }
 
     #[test]

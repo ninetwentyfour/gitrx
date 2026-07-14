@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import type { MouseEvent } from "react";
 import type { FileEntry } from "../types/ipc";
 import { toMessage, useAppStore } from "../store/useAppStore";
@@ -26,6 +26,16 @@ export function FileList({ title, files, staged }: FileListProps) {
 
   // Only this list's selection paints; the other list's is elsewhere.
   const selectedPaths = selection && selection.staged === staged ? selection.paths : [];
+
+  // Untracked (new) files are sorted to the bottom by the backend as a distinct
+  // group. Drive the divider off `status === "untracked"` presence (never off the
+  // `staged` prop) so the staged list — which never contains untracked entries —
+  // is naturally unaffected. The divider only appears when BOTH groups exist; an
+  // all-tracked or all-untracked list gets none. Its path anchor is the first
+  // untracked entry, before which the presentational divider row is inserted.
+  const hasTracked = files.some((f) => f.status !== "untracked");
+  const firstUntrackedPath = files.find((f) => f.status === "untracked")?.path;
+  const dividerBeforePath = hasTracked ? firstUntrackedPath : undefined;
 
   // Unmounting drops the DOM a pending deferred collapse would have acted on, so
   // cancel it (also covers a list switch that swaps this list out).
@@ -71,14 +81,25 @@ export function FileList({ title, files, staged }: FileListProps) {
       ) : (
         <ul className="file-list__items">
           {files.map((entry) => (
-            <FileRow
-              key={entry.path}
-              entry={entry}
-              selected={selectedPaths.includes(entry.path)}
-              onSelect={handleSelect(entry.path)}
-              onActivate={handleActivate(entry.path)}
-              onContextMenu={handleContextMenu(entry.path)}
-            />
+            <Fragment key={entry.path}>
+              {/* Presentational group divider before the first untracked entry.
+                  `aria-hidden` + no interactive element keeps it out of the
+                  accessibility tree and every keyboard/gesture path; selection
+                  order derives from `status.unstaged` (see the store's
+                  `orderedPaths`), so this row never participates in ranges. */}
+              {entry.path === dividerBeforePath && (
+                <li className="file-list__divider" aria-hidden="true">
+                  <span className="file-list__divider-label">Untracked</span>
+                </li>
+              )}
+              <FileRow
+                entry={entry}
+                selected={selectedPaths.includes(entry.path)}
+                onSelect={handleSelect(entry.path)}
+                onActivate={handleActivate(entry.path)}
+                onContextMenu={handleContextMenu(entry.path)}
+              />
+            </Fragment>
           ))}
         </ul>
       )}

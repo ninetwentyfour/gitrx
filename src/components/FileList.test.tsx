@@ -251,3 +251,71 @@ describe("FileList interactions", () => {
     expect(useAppStore.getState().toasts.map((t) => t.message)).not.toContain("Error: menu boom");
   });
 });
+
+describe("FileList untracked group divider", () => {
+  const tracked = (path: string) => makeFileEntry({ path, staged: false, status: "modified" });
+  const untracked = (path: string) => makeFileEntry({ path, staged: false, status: "untracked" });
+
+  // Backend already sorts tracked-then-untracked; the fixtures mirror that order.
+  const mixed = [tracked("a.txt"), tracked("b.txt"), untracked("u1.txt"), untracked("u2.txt")];
+
+  it("renders a divider between the tracked and untracked groups", () => {
+    const { container } = render(<FileList title="Unstaged" files={mixed} staged={false} />);
+    const divider = container.querySelector(".file-list__divider");
+    expect(divider).toBeInTheDocument();
+    // It sits immediately after the last tracked row and before the first untracked.
+    expect(divider?.previousElementSibling).toHaveTextContent("b.txt");
+    expect(divider?.nextElementSibling).toHaveTextContent("u1.txt");
+  });
+
+  it("keeps the divider out of the accessibility/interaction tree", () => {
+    const { container } = render(<FileList title="Unstaged" files={mixed} staged={false} />);
+    const divider = container.querySelector(".file-list__divider");
+    expect(divider).toHaveAttribute("aria-hidden", "true");
+    // No focusable/interactive element inside it.
+    expect(divider?.querySelector("button, a, [tabindex]")).toBeNull();
+  });
+
+  it("renders no divider when every entry is tracked", () => {
+    const { container } = render(
+      <FileList title="Unstaged" files={[tracked("a.txt"), tracked("b.txt")]} staged={false} />,
+    );
+    expect(container.querySelector(".file-list__divider")).toBeNull();
+  });
+
+  it("renders no divider when every entry is untracked", () => {
+    const { container } = render(
+      <FileList
+        title="Unstaged"
+        files={[untracked("u1.txt"), untracked("u2.txt")]}
+        staged={false}
+      />,
+    );
+    expect(container.querySelector(".file-list__divider")).toBeNull();
+  });
+
+  it("never renders a divider for the staged list (driven by untracked presence, not the staged prop)", () => {
+    const { container } = render(
+      <FileList
+        title="Staged"
+        files={[makeFileEntry({ path: "s.txt", staged: true, status: "modified" })]}
+        staged={true}
+      />,
+    );
+    expect(container.querySelector(".file-list__divider")).toBeNull();
+  });
+
+  it("shift-click spanning the divider selects the contiguous tracked+untracked range", () => {
+    // The divider is presentational, so `orderedPaths` (derived from status.unstaged)
+    // is unbroken: a range from a tracked row into an untracked row is contiguous.
+    useAppStore.setState({
+      status: baseStatus({ unstaged: mixed, staged: [] }),
+      selection: null,
+    });
+    render(<FileList title="Unstaged" files={mixed} staged={false} />);
+
+    fireEvent.click(rowBtn(/a\.txt/));
+    fireEvent.click(rowBtn(/u1\.txt/), { shiftKey: true });
+    expect(useAppStore.getState().selection?.paths).toEqual(["a.txt", "b.txt", "u1.txt"]);
+  });
+});

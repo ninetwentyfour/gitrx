@@ -32,11 +32,16 @@ export function FileRow({ entry, selected, onSelect, onActivate, onContextMenu }
   const fullPath =
     entry.status === "renamed" && entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path;
 
+  // Untracked (new) files get a subtly de-emphasised, muted-italic treatment so
+  // they read as a distinct group from tracked changes; the "U" status badge is
+  // left untouched.
+  const untracked = entry.status === "untracked" ? " file-row__btn--untracked" : "";
+
   return (
     <li className="file-row">
       <button
         type="button"
-        className={`file-row__btn${selected ? " is-selected" : ""}`}
+        className={`file-row__btn${untracked}${selected ? " is-selected" : ""}`}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
         onDoubleClick={onActivate}

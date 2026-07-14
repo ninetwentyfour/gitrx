@@ -54,6 +54,10 @@
   --diff-hunk-pin-bg: rgba(240, 240, 245, 0.92);
   --diff-gutter-fg: #8d92b5;
 
+  /* Untracked (new) file rows are de-emphasised to their default opacity (full on
+     hover/selection); kept a palette var so each theme can tune its legibility. */
+  --file-untracked-opacity: 0.6;
+
   --radius: 6px;
   --radius-sm: 4px;
 
@@ -120,6 +124,8 @@
     --diff-hunk-bg: #101017;
     --diff-hunk-pin-bg: rgba(16, 16, 23, 0.92);
     --diff-gutter-fg: #565b80;
+
+    --file-untracked-opacity: 0.65;
   }
 }
 
@@ -168,6 +174,8 @@
      so overlapping header text can't read through, matched to the header bg. */
   --diff-hunk-pin-bg: rgba(240, 240, 245, 0.92);
   --diff-gutter-fg: #8d92b5;
+
+  --file-untracked-opacity: 0.6;
 }
 
 /* Explicit dark choice — wins over a light system preference. */
@@ -186,6 +194,9 @@
   --color-selection: rgba(121, 132, 209, 0.16);
 
   --color-magenta: #fc28a8;
+  /* Near-black text on the lit magenta tube — neon-sign lettering, and AA
+     (~6:1) where white-on-#fc28a8 was 3.5:1. */
+  --color-magenta-fg: #0a0a0d;
   --color-magenta-hover: #ff2e97;
   --color-magenta-disabled-bg: rgba(252, 40, 168, 0.25);
 
@@ -212,6 +223,8 @@
   --diff-hunk-bg: #101017;
   --diff-hunk-pin-bg: rgba(16, 16, 23, 0.92);
   --diff-gutter-fg: #565b80;
+
+  --file-untracked-opacity: 0.65;
 }
 
 *,
@@ -844,6 +857,35 @@ body {
   overflow-y: auto;
 }
 
+/* Presentational group divider marking the start of the untracked (new) files.
+   Non-interactive (aria-hidden, unselectable, no focus target): an eyebrow label
+   flanked by hairline rules. */
+.file-list__divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 6px 4px;
+  user-select: none;
+}
+
+.file-list__divider::before,
+.file-list__divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.file-list__divider-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
 /* ---------- File row ---------- */
 
 .file-row {
@@ -873,6 +915,24 @@ body {
 .file-row__btn.is-selected {
   background: var(--color-selection);
   border-color: var(--color-accent);
+}
+
+/* Untracked (new) files read as a de-emphasised group: the whole row is dimmed to
+   the themed default opacity, returning to full on hover/selection so the
+   selection styling stays fully legible. The path text is muted + italic. The "U"
+   status badge is intentionally left untouched (part of the status system). */
+.file-row__btn--untracked {
+  opacity: var(--file-untracked-opacity);
+}
+
+.file-row__btn--untracked:hover,
+.file-row__btn--untracked.is-selected {
+  opacity: 1;
+}
+
+.file-row__btn--untracked .file-row__path {
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* Merge a contiguous run of selected rows into one block: collapse the interior
