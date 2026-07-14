@@ -1,0 +1,111 @@
+name: Auto Release
+
+# Fires when CI finishes. We deliberately key off `workflow_run` (CI success)
+# rather than `push` so the bot's own bump commit cannot retrigger us: a push
+# made with the default GITHUB_TOKEN does NOT start new workflow runs, so the
+# bump push produces no CI run and therefore no recursion here. The head-commit
+# message guard below is belt-and-suspenders on top of that.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# Serialize rapid merges so two green pushes can't race on the tag/push. We do
+# NOT cancel in-progress: the stale-SHA guard in `bump` cleanly no-ops any run
+# whose commit is no longer master's tip.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    # Only on a SUCCESSFUL CI run for master, and never in reaction to our own
+    # release bump commit (the head_commit message guard is defence-in-depth;
+    # the bump push should not have produced a CI run at all).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      !startsWith(github.event.workflow_run.head_commit.message, 'chore(release):')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      skipped: ${{ steps.bump.outputs.skipped }}
+    steps:
+      # Check out master's current tip. We then assert it still equals the exact
+      # commit CI validated; if master advanced while CI was running we bail so
+      # we never tag/release a commit mixed with unvalidated changes.
+      - name: Checkout master
+        uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: Bump patch version, commit, tag, and push
+        id: bump
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Guard 1 — master must still be exactly what CI validated.
+          CURRENT_SHA="$(git rev-parse HEAD)"
+          if [ "$CURRENT_SHA" != "$HEAD_SHA" ]; then
+            echo "master moved: HEAD=$CURRENT_SHA but CI validated $HEAD_SHA."
+            echo "Skipping — a later green run will release the current tip."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Guard 2 — never react to our own bump commit (belt-and-suspenders).
+          MSG="$(git log -1 --pretty=%s)"
+          case "$MSG" in
+            "chore(release):"*)
+              echo "HEAD is a release bump ($MSG); skipping."
+              echo "skipped=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          CONF="src-tauri/tauri.conf.json"
+          CURRENT="$(jq -r '.version' "$CONF")"
+          IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+          NEW="${MAJ}.${MIN}.$((PAT + 1))"
+          echo "Bumping version ${CURRENT} -> ${NEW}"
+
+          # Rewrite only the "version" line to keep the file byte-identical
+          # elsewhere (jq round-trips would reformat the whole document).
+          sed -E -i "s/(\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\.[0-9]+\.[0-9]+(\")/\1${NEW}\2/" "$CONF"
+
+          # Fail loudly if the bump did not take (e.g. format drift broke the regex).
+          if [ "$(jq -r '.version' "$CONF")" != "$NEW" ]; then
+            echo "version rewrite failed; aborting." >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$CONF"
+          git commit -m "chore(release): v${NEW}"
+          git tag "v${NEW}"
+          git push origin master
+          git push origin "v${NEW}"
+
+          echo "tag=v${NEW}" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: bump
+    # Skip when the bump no-opped (stale SHA / bump commit). If `bump` itself was
+    # skipped by its job-level `if`, this job is skipped automatically.
+    if: needs.bump.outputs.skipped != 'true'
+    permissions:
+      contents: write
+    # Same-run call: build + publish the tag we just created. secrets: inherit so
+    # tauri-action gets GITHUB_TOKEN; the reusable workflow may only downgrade the
+    # contents: write we grant here, never elevate it.
+    uses: ./.github/workflows/release.yml
+    with:
+      tagName: ${{ needs.bump.outputs.tag }}
+      publish: true
+    secrets: inherit
