@@ -1,19 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+/**
+ * FileRow Tests
+ *
+ * A single file row's presentation: no inline action buttons, the selected
+ * styling contract, RTL-safe path truncation (leading dot preserved), and
+ * renamed-path rendering. Click/activate/context-menu forwarding is covered
+ * end-to-end by the FileList suite.
+ *
+ * Key behaviors:
+ * - Renders no Stage/Unstage/Discard buttons (actions moved to menu/dblclick)
+ * - `selected` sets the is-selected class and aria-current
+ * - Path text keeps logical order (leading `.` not reordered); renames show old → new
+ */
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { FileRow } from "./FileRow";
+import { makeFileEntry as makeEntry } from "../test/factories";
 import type { FileEntry } from "../types/ipc";
-
-function makeEntry(overrides: Partial<FileEntry> = {}): FileEntry {
-  return {
-    path: "a.txt",
-    status: "modified",
-    staged: false,
-    isBinary: false,
-    additions: 1,
-    deletions: 0,
-    ...overrides,
-  };
-}
 
 function renderRow(entry: FileEntry, handlers: Partial<Parameters<typeof FileRow>[0]> = {}) {
   return render(
@@ -27,10 +29,6 @@ function renderRow(entry: FileEntry, handlers: Partial<Parameters<typeof FileRow
     />,
   );
 }
-
-afterEach(() => {
-  vi.clearAllMocks();
-});
 
 describe("FileRow", () => {
   it("no longer renders inline Stage/Unstage/Discard action buttons", () => {
@@ -56,22 +54,6 @@ describe("FileRow", () => {
     const selected = screen.getByRole("button", { name: /b\.txt/ });
     expect(selected).toHaveClass("is-selected");
     expect(selected).toHaveAttribute("aria-current", "true");
-  });
-
-  it("forwards click / double-click / context-menu to the handlers", () => {
-    const onSelect = vi.fn();
-    const onActivate = vi.fn();
-    const onContextMenu = vi.fn();
-    renderRow(makeEntry({ path: "x.txt" }), { onSelect, onActivate, onContextMenu });
-
-    const btn = screen.getByRole("button", { name: /x\.txt/ });
-    fireEvent.click(btn);
-    fireEvent.doubleClick(btn);
-    fireEvent.contextMenu(btn);
-
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onActivate).toHaveBeenCalledTimes(1);
-    expect(onContextMenu).toHaveBeenCalledTimes(1);
   });
 
   // The RTL/plaintext truncation must not reorder a leading dot to the end.

@@ -1,49 +1,31 @@
+/**
+ * CommitPanel Tests
+ *
+ * The commit message editor + Commit/Amend button. Verifies the enable/disable
+ * rules (blank message, empty staged set, amend exception, in-flight commit,
+ * unborn HEAD) and the Cmd+Enter shortcut gating.
+ *
+ * Key behaviors:
+ * - Commit disabled unless there is a message AND staged files (or an amend)
+ * - Amend allowed with an empty staged set; Amend checkbox disabled on unborn HEAD
+ * - Cmd+Enter fires doCommit only when the button is enabled
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { CommitPanel } from "./CommitPanel";
 import { useAppStore } from "../store/useAppStore";
-import type { FileEntry, RepoStatus } from "../types/ipc";
+import { makeFileEntry, makeStatus as baseStatus } from "../test/factories";
+import type { RepoStatus } from "../types/ipc";
 
-vi.mock("../api/git", () => ({
-  getStatus: vi.fn(),
-  getDiff: vi.fn(),
-  openRepo: vi.fn(),
-  pickRepoFolder: vi.fn(),
-  stageFile: vi.fn(),
-  unstageFile: vi.fn(),
-  discardFile: vi.fn(),
-  stageHunk: vi.fn(),
-  unstageHunk: vi.fn(),
-  discardHunk: vi.fn(),
-  commit: vi.fn(),
-  getHeadCommitMessage: vi.fn(),
-}));
+vi.mock("../api/git", async () => (await import("../test/factories")).mockGitApi());
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   confirm: vi.fn(),
 }));
 
-function stagedEntry(path = "a.txt"): FileEntry {
-  return {
-    path,
-    status: "modified",
-    staged: true,
-    isBinary: false,
-    additions: 1,
-    deletions: 0,
-  };
-}
-
+/** A status whose staged list holds a single modified file. */
 function makeStatus(overrides: Partial<RepoStatus> = {}): RepoStatus {
-  return {
-    repoName: "repo",
-    repoPath: "/repos/repo",
-    branch: "main",
-    headHasCommits: true,
-    unstaged: [],
-    staged: [stagedEntry()],
-    ...overrides,
-  };
+  return baseStatus({ unstaged: [], staged: [makeFileEntry({ staged: true })], ...overrides });
 }
 
 /** Seed the store with a known baseline before each render. */

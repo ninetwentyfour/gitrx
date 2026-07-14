@@ -48,8 +48,15 @@ const WINDOW_TITLE: &str = "gitrx";
 pub enum OpenDecision {
     /// A window already shows this repo; focus the given label.
     Focus(String),
-    /// No window shows it; create a new window with the given (stable) label.
+    /// No window shows it and the derived label is free; create a new window with
+    /// the given (stable) label.
     CreateNew(String),
+    /// No window shows this repo, but a *live* window already owns the derived
+    /// stable label — it was rebound to a different repo, so its label now
+    /// collides with this request. Rebuilding would fail on the duplicate label
+    /// (and the failure path would strip the live window's binding, zombifying
+    /// it). Instead, rebind that window to this repo and focus it.
+    FocusAndRebind(String),
 }
 
 /// Normalize a path for comparison/hashing: lossy string with any trailing
@@ -69,7 +76,7 @@ fn normalize(path: &Path) -> String {
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
-        hash ^= b as u64;
+        hash ^= u64::from(b);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
@@ -95,12 +102,24 @@ pub fn decide_open<'a>(
     canonical: &Path,
 ) -> OpenDecision {
     let target = normalize(canonical);
+    let new_label = label_for_repo(canonical);
+    let mut label_taken = false;
     for (label, path) in existing {
         if normalize(path) == target {
             return OpenDecision::Focus(label.to_string());
         }
+        // A live window already owns the label we would create under — it was
+        // rebound to a different repo (its stable label no longer matches its
+        // current repo). Remember it: we must rebind, not rebuild.
+        if label == new_label {
+            label_taken = true;
+        }
     }
-    OpenDecision::CreateNew(label_for_repo(canonical))
+    if label_taken {
+        OpenDecision::FocusAndRebind(new_label)
+    } else {
+        OpenDecision::CreateNew(new_label)
+    }
 }
 
 /// Resolve any path (repo root, subdirectory, or a path with a trailing slash) to
@@ -114,53 +133,81 @@ pub fn resolve_workdir(path: &Path) -> AppResult<PathBuf> {
     Ok(std::fs::canonicalize(&workdir).unwrap_or(workdir))
 }
 
-/// Bind `repo_path` to the window `label`, (re)starting that window's filesystem
-/// watcher. Any prior binding for the label is replaced (dropping its watcher).
+/// Build the watcher for `repo_path`, record the `label -> repo` binding, and
+/// update the most-recently-opened path. Returns any watcher-build failure as a
+/// message string for the caller to surface as `watch-error` (deferred, so a
+/// pre-window-creation bind does not lose it — see [`create_repo_window`]).
 ///
-/// Best-effort watching: a watcher-build failure surfaces a `watch-error` to the
-/// window and still records the binding, so the window remains fully usable.
-pub fn set_window_repo(app: &AppHandle, label: &str, repo_path: PathBuf) {
-    let watcher = match crate::watch::build_watcher(app, label, &repo_path) {
-        Ok(watcher) => Some(watcher),
-        Err(e) => {
-            let _ = app.emit_to(
-                label,
-                "watch-error",
-                format!("Failed to start file watcher: {e}"),
-            );
-            None
-        }
+/// Unconditional: does **not** check that the window exists. Used by
+/// [`create_repo_window`], which binds *before* building the window on purpose.
+/// Command-path callers use [`set_window_repo`], which guards against binding to
+/// a window that has already closed.
+fn record_binding(app: &AppHandle, label: &str, repo_path: PathBuf) -> Option<String> {
+    let (watcher, watch_error) = match crate::watch::build_watcher(app, label, &repo_path) {
+        Ok(watcher) => (Some(watcher), None),
+        Err(e) => (None, Some(format!("Failed to start file watcher: {e}"))),
     };
 
     let state = app.state::<AppState>();
-    let mut windows = match state.windows.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    windows.insert(label.to_string(), WindowRepo { repo_path, watcher });
+    if let Ok(mut windows) = state.windows.lock() {
+        windows.insert(
+            label.to_string(),
+            WindowRepo {
+                repo_path: repo_path.clone(),
+                watcher,
+            },
+        );
+    }
+    // Record open order for the legacy `lastRepoPath` key (L6): a bind is the
+    // moment a repo becomes the most-recently-opened one.
+    if let Ok(mut last) = state.last_opened.lock() {
+        *last = Some(repo_path);
+    }
+    watch_error
+}
+
+/// Bind `repo_path` to the window `label`, (re)starting that window's filesystem
+/// watcher. Any prior binding for the label is replaced (dropping its watcher).
+///
+/// Guarded: the bind is applied only if `label` still names a live window. A
+/// window closed mid-flight (its `Destroyed` handler already removed the entry)
+/// must not be re-inserted — that would resurrect a ghost binding and leak a
+/// watcher for a dead label. In that case this returns `Err(AppError::WindowClosed)`.
+///
+/// Best-effort watching: a watcher-build failure surfaces a `watch-error` to the
+/// (live) window and still records the binding, so the window remains usable.
+pub fn set_window_repo(app: &AppHandle, label: &str, repo_path: PathBuf) -> AppResult<()> {
+    // Guard the destroyed-vs-in-flight race (M2): only bind to a live window.
+    if app.get_webview_window(label).is_none() {
+        return Err(AppError::window_closed());
+    }
+    if let Some(msg) = record_binding(app, label, repo_path) {
+        // The window exists, so surface the watcher failure immediately.
+        let _ = app.emit_to(label, "watch-error", msg);
+    }
+    Ok(())
 }
 
 /// Remove a window's binding (dropping its watcher). Returns whether an entry was
 /// present.
 pub fn remove_window(app: &AppHandle, label: &str) -> bool {
     let state = app.state::<AppState>();
-    let removed = match state.windows.lock() {
-        Ok(mut windows) => windows.remove(label).is_some(),
-        Err(_) => false,
-    };
-    removed
+    state
+        .windows
+        .lock()
+        .is_ok_and(|mut windows| windows.remove(label).is_some())
 }
 
 /// Open a window for the repository at `workdir` (already a canonical working
 /// tree), or focus the existing one. Used by the single-instance forwarding
 /// callback. On create, persists the updated open-repos set.
-pub fn open_or_focus(app: &AppHandle, workdir: PathBuf) -> Result<(), String> {
+pub fn open_or_focus(app: &AppHandle, workdir: PathBuf) -> AppResult<()> {
     let decision = {
         let state = app.state::<AppState>();
         let windows = state
             .windows
             .lock()
-            .map_err(|_| "Internal state lock poisoned".to_string())?;
+            .map_err(|_| AppError::git("Internal state lock poisoned"))?;
         let snapshot: Vec<(String, PathBuf)> = windows
             .iter()
             .map(|(label, repo)| (label.clone(), repo.repo_path.clone()))
@@ -179,17 +226,43 @@ pub fn open_or_focus(app: &AppHandle, workdir: PathBuf) -> Result<(), String> {
             }
             Ok(())
         }
-        OpenDecision::CreateNew(label) => create_repo_window(app, &label, workdir),
+        // Both route through `create_repo_window`, which rebinds+focuses when the
+        // label already names a live window (FocusAndRebind, and defensively for
+        // CreateNew too) and otherwise builds a fresh window.
+        OpenDecision::CreateNew(label) | OpenDecision::FocusAndRebind(label) => {
+            create_repo_window(app, &label, workdir)
+        }
     }
 }
 
-/// Create a new repo window with the stable `label` for `workdir`.
+/// Create a new repo window with the stable `label` for `workdir`, or — if a
+/// window with that label is already live — rebind it to `workdir` and focus it.
 ///
-/// Binds the repo BEFORE building the window so the fresh frontend's `get_status`
-/// resolves its repo by label with zero extra round-trips. Rolls the binding back
-/// if the window fails to build.
-pub fn create_repo_window(app: &AppHandle, label: &str, workdir: PathBuf) -> Result<(), String> {
-    set_window_repo(app, label, workdir);
+/// The rebind branch is the fix for the label-collision zombie (H2): when a
+/// window's stable label was reused for a different repo (via an in-window
+/// `open_repo`), a later request for the *original* repo derives the same label.
+/// Rebuilding under a live label fails on the duplicate and the error path would
+/// strip the live window's binding — killing it. So we detect the live window
+/// first and rebind instead of rebuilding.
+///
+/// On the create path, the repo is bound BEFORE the window is built so the fresh
+/// frontend's `get_status` resolves its repo by label with zero extra
+/// round-trips. Any watcher failure from that pre-bind is deferred and emitted
+/// only after the window exists (L2), then the binding is rolled back if the
+/// build fails.
+pub fn create_repo_window(app: &AppHandle, label: &str, workdir: PathBuf) -> AppResult<()> {
+    // H2: a live window already owns this label — rebind + focus, never rebuild.
+    if let Some(window) = app.get_webview_window(label) {
+        set_window_repo(app, label, workdir)?;
+        persist_open_repos(app);
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    // Pre-bind before the window exists. The window is not yet created, so a
+    // watcher failure here cannot be emitted (there is no listener); defer it.
+    let deferred_watch_error = record_binding(app, label, workdir);
 
     let built = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title(WINDOW_TITLE)
@@ -199,12 +272,19 @@ pub fn create_repo_window(app: &AppHandle, label: &str, workdir: PathBuf) -> Res
 
     match built {
         Ok(_) => {
+            // L2: now that the window exists, surface any creation-time watcher
+            // failure so it is not silently lost. (A residual race remains if the
+            // webview has not yet registered its listener; watcher-build failures
+            // are rare and non-fatal.)
+            if let Some(msg) = deferred_watch_error {
+                let _ = app.emit_to(label, "watch-error", msg);
+            }
             persist_open_repos(app);
             Ok(())
         }
         Err(e) => {
             remove_window(app, label);
-            Err(format!("Failed to open window: {e}"))
+            Err(AppError::git(format!("Failed to open window: {e}")))
         }
     }
 }
@@ -263,10 +343,30 @@ pub fn persist_open_repos(app: &AppHandle) {
     if let Ok(store) = app.store(SETTINGS_STORE) {
         store.set(OPEN_REPOS_KEY, open_repos_to_json(&repos));
         // Keep the legacy single-repo key populated for backward compatibility.
-        if let Some(last) = repos.last() {
-            store.set(LAST_REPO_KEY, JsonValue::String(last.clone()));
+        // It must be the most-recently-*opened* repo (L6), not the alphabetically
+        // last entry of the sorted set — so a restore that honors only this key
+        // reopens what the user was last in. Fall back to the sorted last entry
+        // when the tracked repo is no longer open (e.g. its window just closed).
+        if let Some(last) = most_recently_opened_present(app, &repos) {
+            store.set(LAST_REPO_KEY, JsonValue::String(last));
         }
         let _ = store.save();
+    }
+}
+
+/// The most-recently-opened repo path if it is still in `repos`, else the sorted
+/// last entry as a stable fallback. `repos` is the current open-repos set.
+fn most_recently_opened_present(app: &AppHandle, repos: &[String]) -> Option<String> {
+    let tracked = app
+        .state::<AppState>()
+        .last_opened
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .map(|p| p.to_string_lossy().into_owned());
+    match tracked {
+        Some(path) if repos.iter().any(|r| r == &path) => Some(path),
+        _ => repos.last().cloned(),
     }
 }
 
@@ -340,7 +440,7 @@ pub fn resolve_arg_path(arg: &str, cwd: &str) -> PathBuf {
 pub fn resolve_cli_workdir(arg: &str, cwd: &str) -> AppResult<PathBuf> {
     let candidate = resolve_arg_path(arg, cwd);
     if !candidate.exists() {
-        return Err(AppError::msg(format!(
+        return Err(AppError::validation(format!(
             "Cannot resolve path '{}'",
             candidate.display()
         )));
@@ -408,7 +508,7 @@ mod tests {
 
     #[test]
     fn decide_open_focuses_existing_match() {
-        let existing = vec![
+        let existing = [
             ("main".to_string(), p("/repos/a")),
             ("repo-x".to_string(), p("/repos/b")),
         ];
@@ -420,9 +520,38 @@ mod tests {
     }
 
     #[test]
+    fn decide_open_rebinds_when_label_taken_by_a_different_repo() {
+        // A window carries repo-B's session but still holds repo-A's stable label
+        // (it was rebound in place). Requesting repo-A derives that same label, so
+        // the decision must be FocusAndRebind — never CreateNew (which would fail
+        // on the duplicate label and zombify the live window).
+        let target = p("/repos/a");
+        let a_label = label_for_repo(&target);
+        let existing = [(a_label.clone(), p("/repos/b"))];
+        let decision = decide_open(
+            existing.iter().map(|(l, p)| (l.as_str(), p.as_path())),
+            &target,
+        );
+        assert_eq!(decision, OpenDecision::FocusAndRebind(a_label));
+    }
+
+    #[test]
+    fn decide_open_creates_when_label_is_free() {
+        // Same repo-B window, but under a non-colliding label — requesting repo-A
+        // is a plain create.
+        let existing = [("repo-unrelated".to_string(), p("/repos/b"))];
+        let target = p("/repos/a");
+        let decision = decide_open(
+            existing.iter().map(|(l, p)| (l.as_str(), p.as_path())),
+            &target,
+        );
+        assert_eq!(decision, OpenDecision::CreateNew(label_for_repo(&target)));
+    }
+
+    #[test]
     fn decide_open_focus_is_trailing_slash_insensitive() {
         // Stored with git2's trailing slash; requested without (and vice versa).
-        let existing = vec![("main".to_string(), p("/repos/a/"))];
+        let existing = [("main".to_string(), p("/repos/a/"))];
         let decision = decide_open(
             existing.iter().map(|(l, p)| (l.as_str(), p.as_path())),
             &p("/repos/a"),
@@ -495,7 +624,7 @@ mod tests {
         let argv = vec![
             "gitrx".to_string(),
             "--flag".to_string(),
-            "".to_string(),
+            String::new(),
             "/repos/b".to_string(),
         ];
         assert_eq!(first_path_arg(&argv), Some("/repos/b".to_string()));

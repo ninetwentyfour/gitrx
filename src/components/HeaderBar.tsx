@@ -2,9 +2,9 @@ import type { RepoStatus } from "../types/ipc";
 import { ContextSlider } from "./ContextSlider";
 import { ThemeToggle } from "./ThemeToggle";
 
-interface HeaderBarProps {
+type HeaderBarProps = {
   status: RepoStatus;
-}
+};
 
 /**
  * Top fixed-height bar: repo/branch on the left; the context slider and the

@@ -1,13 +1,19 @@
 mod cli_install;
 mod commands;
 mod context_menu;
-mod error;
+pub mod error;
 pub mod git;
 mod image;
 mod menu;
 mod state;
 mod watch;
 mod windows;
+
+// Shared git-layer test fixtures. Unit tests reach these via
+// `crate::test_support::*`; the `hunk_staging` integration test pulls the same
+// source in with `#[path]` (see `test_support.rs` for why it is not a feature).
+#[cfg(test)]
+mod test_support;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -25,7 +31,7 @@ pub fn run() {
         // second launch, forwards its argv/cwd to this callback, and exits — so
         // `gitrx <path>` never spawns a duplicate Dock icon.
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            handle_second_instance(app, argv, cwd);
+            handle_second_instance(app, &argv, &cwd);
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -40,7 +46,7 @@ pub fn run() {
         // `setup` instead only *enqueues* `init_for_nsapp` on the main thread, so
         // it would run *after* our registration attempt, leaving the Window menu
         // inert.
-        .menu(|handle| menu::build_menu(handle))
+        .menu(menu::build_menu)
         .setup(|app| {
             app.on_menu_event(|app, event| {
                 menu::handle_menu_event(app, event.id().as_ref());
@@ -102,9 +108,9 @@ pub fn run() {
 
 /// A second `gitrx` invocation was intercepted. With a path arg → open-or-focus a
 /// window for that repo; without → just surface an existing window.
-fn handle_second_instance(app: &AppHandle, argv: Vec<String>, cwd: String) {
-    match windows::first_path_arg(&argv) {
-        Some(arg) => match windows::resolve_cli_workdir(&arg, &cwd) {
+fn handle_second_instance(app: &AppHandle, argv: &[String], cwd: &str) {
+    match windows::first_path_arg(argv) {
+        Some(arg) => match windows::resolve_cli_workdir(&arg, cwd) {
             Ok(workdir) => {
                 if let Err(e) = windows::open_or_focus(app, workdir) {
                     eprintln!("Failed to open forwarded repo '{arg}': {e}");
@@ -140,12 +146,13 @@ fn startup_restore(app: &AppHandle) {
     // Identity = the repo's stable label; dedupes the CLI repo against the
     // persisted list and any duplicate persisted entries.
     let mut opened: HashSet<String> = HashSet::new();
-    let mut main_bound = false;
 
+    let mut main_bound = cli_workdir.is_some();
     if let Some(workdir) = cli_workdir {
         opened.insert(windows::label_for_repo(&workdir));
-        windows::set_window_repo(app, MAIN_LABEL, workdir);
-        main_bound = true;
+        // The initial `main` window is built during `build()`, so it is live here;
+        // ignore the closed-window guard's result (it cannot fail at startup).
+        let _ = windows::set_window_repo(app, MAIN_LABEL, workdir);
     }
 
     for path in windows::load_open_repos(app) {
@@ -157,7 +164,7 @@ fn startup_restore(app: &AppHandle) {
             continue; // already opened this repo
         }
         if !main_bound {
-            windows::set_window_repo(app, MAIN_LABEL, workdir);
+            let _ = windows::set_window_repo(app, MAIN_LABEL, workdir);
             main_bound = true;
         } else if let Err(e) = windows::create_repo_window(app, &label, workdir) {
             eprintln!("Failed to restore repo window: {e}");

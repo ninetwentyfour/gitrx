@@ -66,7 +66,7 @@ pub struct PatchLine {
 }
 
 /// The role of a hunk line.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PatchLineKind {
     Context,
@@ -101,12 +101,12 @@ const NO_NEWLINE_MARKER: &[u8] = b"\\ No newline at end of file\n";
 ///   CRLF files.
 pub fn build_patch(payload: &HunkPatchPayload) -> AppResult<Vec<u8>> {
     if payload.is_untracked {
-        return Err(AppError::msg(
+        return Err(AppError::validation(
             "Refusing to synthesize a patch for an untracked file; stage it whole-file instead",
         ));
     }
     if payload.lines.is_empty() {
-        return Err(AppError::msg("Hunk payload has no lines to apply"));
+        return Err(AppError::validation("Hunk payload has no lines to apply"));
     }
 
     let new_path = payload.path.as_str();
@@ -117,14 +117,14 @@ pub fn build_patch(payload: &HunkPatchPayload) -> AppResult<Vec<u8>> {
     // A trailing (or embedded) `\r` is deliberately allowed for CRLF fidelity.
     for p in [new_path, old_path] {
         if p.contains('\n') || p.contains('\0') {
-            return Err(AppError::msg(
+            return Err(AppError::validation(
                 "Path must not contain newline or NUL characters",
             ));
         }
     }
     for line in &payload.lines {
         if line.content.contains('\n') || line.content.contains('\0') {
-            return Err(AppError::msg(
+            return Err(AppError::validation(
                 "Line content must not contain newline or NUL characters",
             ));
         }
@@ -206,7 +206,9 @@ fn parse_starts(header: &str) -> AppResult<(u64, u64)> {
 
     match (old_start, new_start) {
         (Some(o), Some(n)) => Ok((o, n)),
-        _ => Err(AppError::msg(format!("Malformed hunk header: {header}"))),
+        _ => Err(AppError::validation(format!(
+            "Malformed hunk header: {header}"
+        ))),
     }
 }
 

@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint",
+    "lint": "oxlint --type-aware",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
   },
@@ -37,6 +37,7 @@
     "jsdom": "^29.1.1",
     "oxfmt": "^0.58.0",
     "oxlint": "^1.73.0",
+    "oxlint-tsgolint": "^0.24.0",
     "typescript": "^7.0.2",
     "vite": "npm:rolldown-vite@^7.3.1",
     "vitest": "^4.1.10"

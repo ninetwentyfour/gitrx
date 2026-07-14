@@ -67,11 +67,15 @@ function App() {
   const status = useAppStore((s) => s.status);
   const initialize = useAppStore((s) => s.initialize);
   const initWatcher = useAppStore((s) => s.initWatcher);
+  const disposeWatcher = useAppStore((s) => s.disposeWatcher);
 
   useEffect(() => {
     void initialize();
     void initWatcher();
-  }, [initialize, initWatcher]);
+    // Tear down the watcher subscriptions on unmount so they never outlive the
+    // component (and StrictMode's mount→unmount→mount does not stack listeners).
+    return () => disposeWatcher();
+  }, [initialize, initWatcher, disposeWatcher]);
 
   return (
     <div className="app">

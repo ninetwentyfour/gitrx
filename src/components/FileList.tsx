@@ -1,15 +1,15 @@
 import { useEffect } from "react";
 import type { MouseEvent } from "react";
 import type { FileEntry } from "../types/ipc";
-import { useAppStore } from "../store/useAppStore";
+import { toMessage, useAppStore } from "../store/useAppStore";
 import { showFileContextMenu } from "../api/git";
 import { FileRow } from "./FileRow";
 
-interface FileListProps {
+type FileListProps = {
   title: string;
   files: FileEntry[];
   staged: boolean;
-}
+};
 
 /**
  * A titled, scrollable list of file changes with an empty-state fallback.
@@ -57,7 +57,7 @@ export function FileList({ title, files, staged }: FileListProps) {
       selectFile(path, staged);
       paths = [path];
     }
-    showFileContextMenu(paths, staged).catch((err) => pushToast(String(err)));
+    showFileContextMenu(paths, staged).catch((err) => pushToast(toMessage(err)));
   };
 
   return (

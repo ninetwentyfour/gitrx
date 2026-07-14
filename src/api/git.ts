@@ -9,7 +9,8 @@ export function openRepo(path: string): Promise<RepoStatus> {
 
 /**
  * Fetch the status of the currently open repository.
- * Rejects with the string "No repository open" when no repo is open.
+ * Rejects with a structured `AppError` whose `name` is `"noRepoOpen"` when no
+ * repo is bound to this window (see `src/lib/errors.ts`).
  */
 export function getStatus(): Promise<RepoStatus> {
   return invoke<RepoStatus>("get_status");

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{State, WebviewWindow};
 
+use crate::error::{AppError, AppResult};
 use crate::git::{
     apply_hunk_verified, build_status, commit as git_commit, file_diff, head_commit_message,
     open_repository, validate_repo_relative_path, ApplyTarget, FileDiff, HunkPatchPayload,
@@ -24,18 +25,15 @@ pub struct CommitResult {
 /// calling `window`, and each window shows its own repository (keyed by label in
 /// [`AppState::windows`]). JS call sites are unchanged — the window is not part of
 /// the argument payload.
-fn window_repo_path(
-    state: &State<'_, AppState>,
-    window: &WebviewWindow,
-) -> Result<PathBuf, String> {
+fn window_repo_path(state: &State<'_, AppState>, window: &WebviewWindow) -> AppResult<PathBuf> {
     let windows = state
         .windows
         .lock()
-        .map_err(|_| "Internal state lock poisoned".to_string())?;
+        .map_err(|_| AppError::git("Internal state lock poisoned"))?;
     windows
         .get(window.label())
         .map(|repo| repo.repo_path.clone())
-        .ok_or_else(|| "No repository open".to_string())
+        .ok_or_else(AppError::no_repo_open)
 }
 
 /// Validate `path` is a git repository, bind it to the calling window, and return
@@ -46,14 +44,26 @@ pub async fn open_repo(
     app: tauri::AppHandle,
     window: WebviewWindow,
     _state: State<'_, AppState>,
-) -> Result<RepoStatus, String> {
-    let workdir = crate::windows::resolve_workdir(&PathBuf::from(&path)).map_err(String::from)?;
-    let repo = open_repository(&workdir)?;
-    let status = build_status(&repo)?;
-    // `Repository` is not `Send`; drop it before touching shared state / awaits.
-    drop(repo);
+) -> AppResult<RepoStatus> {
+    let path_buf = PathBuf::from(&path);
+    // Run all libgit2 work off the async runtime (M3): resolve the workdir, open
+    // the repo, and read status inside the blocking closure. `Repository` is not
+    // `Send`, so it is created and dropped entirely within the closure; only the
+    // `Send` results cross back.
+    let (workdir, status) =
+        tauri::async_runtime::spawn_blocking(move || -> AppResult<(PathBuf, RepoStatus)> {
+            let workdir = crate::windows::resolve_workdir(&path_buf)?;
+            let repo = open_repository(&workdir)?;
+            let status = build_status(&repo)?;
+            drop(repo);
+            Ok((workdir, status))
+        })
+        .await
+        .map_err(|e| AppError::git(format!("Failed to run open task: {e}")))??;
 
-    crate::windows::set_window_repo(&app, window.label(), workdir);
+    // Guarded bind: if this window was closed while the open ran, do not
+    // resurrect a ghost binding (M2).
+    crate::windows::set_window_repo(&app, window.label(), workdir)?;
     crate::windows::persist_open_repos(&app);
 
     Ok(status)
@@ -64,10 +74,15 @@ pub async fn open_repo(
 pub async fn get_status(
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<RepoStatus, String> {
+) -> AppResult<RepoStatus> {
     let path = window_repo_path(&state, &window)?;
-    let repo = open_repository(&path)?;
-    Ok(build_status(&repo)?)
+    // libgit2 off the async runtime (M3).
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<RepoStatus> {
+        let repo = open_repository(&path)?;
+        build_status(&repo)
+    })
+    .await
+    .map_err(|e| AppError::git(format!("Failed to run status task: {e}")))?
 }
 
 /// Return the diff of a single file in the calling window's repository.
@@ -81,12 +96,22 @@ pub async fn get_diff(
     context_lines: u32,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<FileDiff, String> {
+) -> AppResult<FileDiff> {
     let repo_path = window_repo_path(&state, &window)?;
-    validate_repo_relative_path(&repo_path, &path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &path)?;
 
-    let repo = open_repository(&repo_path)?;
-    Ok(file_diff(&repo, &path, staged, context_lines)?)
+    // Defense in depth: clamp the client-supplied context to the UI's 0..=8 range
+    // so a hostile/buggy payload cannot request an enormous context window.
+    // (`u32` floors at 0, so only the upper bound needs clamping.)
+    let context_lines = context_lines.min(8);
+
+    // libgit2 off the async runtime (M3).
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<FileDiff> {
+        let repo = open_repository(&repo_path)?;
+        file_diff(&repo, &path, staged, context_lines)
+    })
+    .await
+    .map_err(|e| AppError::git(format!("Failed to run diff task: {e}")))?
 }
 
 /// Stage the whole-file change for `path` in the calling window's repository.
@@ -95,18 +120,18 @@ pub async fn stage_file(
     path: String,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(&state, &window)?;
-    validate_repo_relative_path(&repo_path, &path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::stage_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("Failed to run stage task: {e}"))?
+    .map_err(|e| AppError::git(format!("Failed to run stage task: {e}")))?
 }
 
 /// Unstage the whole-file change for `path`, resetting it back to HEAD.
@@ -115,18 +140,18 @@ pub async fn unstage_file(
     path: String,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(&state, &window)?;
-    validate_repo_relative_path(&repo_path, &path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::unstage_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("Failed to run unstage task: {e}"))?
+    .map_err(|e| AppError::git(format!("Failed to run unstage task: {e}")))?
 }
 
 /// Discard the working-tree changes for `path` (or delete it if untracked).
@@ -135,18 +160,79 @@ pub async fn discard_file(
     path: String,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(&state, &window)?;
-    validate_repo_relative_path(&repo_path, &path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::discard_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("Failed to run discard task: {e}"))?
+    .map_err(|e| AppError::git(format!("Failed to run discard task: {e}")))?
+}
+
+/// Which hunk command is validating its payload direction (see
+/// [`validate_hunk_direction`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HunkCommand {
+    Stage,
+    Unstage,
+    Discard,
+}
+
+/// Validate that a hunk payload's `staged`/`is_untracked` flags match the command
+/// it was sent to, returning the [`ApplyTarget`] to apply with.
+///
+/// Extracted from the three hunk commands so the direction guards are unit-
+/// testable in isolation (the inline versions were not). The freshness re-check
+/// in `apply_hunk_verified` still runs afterward — these flags are advisory — but
+/// rejecting an obviously wrong direction up front gives the caller a precise
+/// error and avoids a pointless re-diff.
+fn validate_hunk_direction(
+    payload: &HunkPatchPayload,
+    command: HunkCommand,
+) -> AppResult<ApplyTarget> {
+    match command {
+        HunkCommand::Stage => {
+            if payload.staged {
+                return Err(AppError::validation(
+                    "stage_hunk expects a hunk from the unstaged diff",
+                ));
+            }
+            if payload.is_untracked {
+                return Err(AppError::validation(
+                    "Cannot hunk-stage an untracked file; use stage_file to stage it whole instead",
+                ));
+            }
+            Ok(ApplyTarget::Index)
+        }
+        HunkCommand::Unstage => {
+            if !payload.staged {
+                return Err(AppError::validation(
+                    "unstage_hunk expects a hunk from the staged diff",
+                ));
+            }
+            Ok(ApplyTarget::IndexReverse)
+        }
+        HunkCommand::Discard => {
+            // Order matches the original inline guard: reject untracked before
+            // the staged-direction check.
+            if payload.is_untracked {
+                return Err(AppError::validation(
+                    "Cannot discard a hunk of an untracked file; use discard_file to delete it instead",
+                ));
+            }
+            if payload.staged {
+                return Err(AppError::validation(
+                    "discard_hunk expects a hunk from the unstaged diff",
+                ));
+            }
+            Ok(ApplyTarget::WorkdirReverse)
+        }
+    }
 }
 
 /// Stage a single hunk (payload taken from the *unstaged* diff) into the index.
@@ -155,17 +241,9 @@ pub async fn stage_hunk(
     payload: HunkPatchPayload,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    if payload.staged {
-        return Err("stage_hunk expects a hunk from the unstaged diff".to_string());
-    }
-    if payload.is_untracked {
-        return Err(
-            "Cannot hunk-stage an untracked file; use stage_file to stage it whole instead"
-                .to_string(),
-        );
-    }
-    run_hunk(&state, &window, payload, ApplyTarget::Index).await
+) -> AppResult<()> {
+    let target = validate_hunk_direction(&payload, HunkCommand::Stage)?;
+    run_hunk(&state, &window, payload, target).await
 }
 
 /// Unstage a single hunk (payload taken from the *staged* diff) from the index.
@@ -174,11 +252,9 @@ pub async fn unstage_hunk(
     payload: HunkPatchPayload,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    if !payload.staged {
-        return Err("unstage_hunk expects a hunk from the staged diff".to_string());
-    }
-    run_hunk(&state, &window, payload, ApplyTarget::IndexReverse).await
+) -> AppResult<()> {
+    let target = validate_hunk_direction(&payload, HunkCommand::Unstage)?;
+    run_hunk(&state, &window, payload, target).await
 }
 
 /// Discard a single hunk (payload taken from the *unstaged* diff) from the
@@ -192,17 +268,9 @@ pub async fn discard_hunk(
     payload: HunkPatchPayload,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    if payload.is_untracked {
-        return Err(
-            "Cannot discard a hunk of an untracked file; use discard_file to delete it instead"
-                .to_string(),
-        );
-    }
-    if payload.staged {
-        return Err("discard_hunk expects a hunk from the unstaged diff".to_string());
-    }
-    run_hunk(&state, &window, payload, ApplyTarget::WorkdirReverse).await
+) -> AppResult<()> {
+    let target = validate_hunk_direction(&payload, HunkCommand::Discard)?;
+    run_hunk(&state, &window, payload, target).await
 }
 
 /// Shared driver for the three hunk commands: serialize on the write lock,
@@ -212,38 +280,38 @@ pub async fn discard_hunk(
 ///
 /// The freshness re-verification (re-running `file_diff` and requiring the hunk
 /// to still exist verbatim) happens inside `apply_hunk_verified`, so the
-/// frontend's `staged` / `is_untracked` flags are advisory only. git's stderr
-/// rides `AppError` -> `String`, so "patch does not apply" and the
-/// "changed since displayed" message reach the frontend intact.
+/// frontend's `staged` / `is_untracked` flags are advisory only. `apply_hunk_verified`
+/// surfaces a `StaleHunk` variant for "changed since displayed" and a `Git` variant
+/// carrying git's stderr ("patch does not apply") — both reach the frontend intact.
 async fn run_hunk(
     state: &State<'_, AppState>,
     window: &WebviewWindow,
     payload: HunkPatchPayload,
     target: ApplyTarget,
-) -> Result<(), String> {
+) -> AppResult<()> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(state, window)?;
 
     // Validate up front (defense in depth; `apply_hunk_verified` re-checks).
-    validate_repo_relative_path(&repo_path, &payload.path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &payload.path)?;
     if let Some(old) = payload.old_path.as_deref() {
-        validate_repo_relative_path(&repo_path, old).map_err(String::from)?;
+        validate_repo_relative_path(&repo_path, old)?;
     }
 
     let repo = open_repository(&repo_path)?;
     let workdir = repo
         .workdir()
-        .ok_or_else(|| "Repository has no working tree".to_string())?
+        .ok_or_else(|| AppError::validation("Repository has no working tree"))?
         .to_path_buf();
     // `Repository` is not `Send`; drop it before crossing the blocking boundary.
     // `apply_hunk_verified` re-opens its own handle inside the closure.
     drop(repo);
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        apply_hunk_verified(&workdir, &payload, target).map_err(String::from)
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+        apply_hunk_verified(&workdir, &payload, target)
     })
     .await
-    .map_err(|e| format!("Failed to run hunk-apply task: {e}"))?
+    .map_err(|e| AppError::git(format!("Failed to run hunk-apply task: {e}")))?
 }
 
 /// Create a commit from the current index (or amend HEAD when `amend`).
@@ -256,11 +324,17 @@ pub async fn commit(
     amend: bool,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<CommitResult, String> {
+) -> AppResult<CommitResult> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(&state, &window)?;
-    let repo = open_repository(&repo_path)?;
-    let oid = git_commit(&repo, &message, amend)?;
+    // libgit2 off the async runtime (M3); the write lock is held across the await
+    // so the commit still serializes against other index mutations.
+    let oid = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        let repo = open_repository(&repo_path)?;
+        git_commit(&repo, &message, amend)
+    })
+    .await
+    .map_err(|e| AppError::git(format!("Failed to run commit task: {e}")))??;
     Ok(CommitResult { oid })
 }
 
@@ -270,10 +344,15 @@ pub async fn commit(
 pub async fn get_head_commit_message(
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> AppResult<String> {
     let repo_path = window_repo_path(&state, &window)?;
-    let repo = open_repository(&repo_path)?;
-    Ok(head_commit_message(&repo)?)
+    // libgit2 off the async runtime (M3).
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        let repo = open_repository(&repo_path)?;
+        head_commit_message(&repo)
+    })
+    .await
+    .map_err(|e| AppError::git(format!("Failed to run head-message task: {e}")))?
 }
 
 /// Read an image file (working tree or staged index blob) and return it
@@ -288,14 +367,88 @@ pub async fn read_image(
     staged: bool,
     window: WebviewWindow,
     state: State<'_, AppState>,
-) -> Result<ImageData, String> {
+) -> AppResult<ImageData> {
     let repo_path = window_repo_path(&state, &window)?;
-    validate_repo_relative_path(&repo_path, &path).map_err(String::from)?;
+    validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<ImageData, String> {
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<ImageData> {
         let repo = open_repository(&repo_path)?;
-        Ok(read_image_data(&repo, &path, staged, MAX_IMAGE_BYTES)?)
+        read_image_data(&repo, &path, staged, MAX_IMAGE_BYTES)
     })
     .await
-    .map_err(|e| format!("Failed to run read_image task: {e}"))?
+    .map_err(|e| AppError::git(format!("Failed to run read_image task: {e}")))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal payload with the two flags that drive direction validation.
+    fn payload(staged: bool, is_untracked: bool) -> HunkPatchPayload {
+        HunkPatchPayload {
+            path: "file.txt".to_string(),
+            old_path: None,
+            staged,
+            is_untracked,
+            context_lines: 3,
+            header: "@@ -1,1 +1,1 @@".to_string(),
+            lines: Vec::new(),
+        }
+    }
+
+    // ---- Stage ----
+
+    #[test]
+    fn stage_accepts_unstaged_tracked_hunk() {
+        let target = validate_hunk_direction(&payload(false, false), HunkCommand::Stage);
+        assert!(matches!(target, Ok(ApplyTarget::Index)));
+    }
+
+    #[test]
+    fn stage_rejects_a_staged_hunk() {
+        let err = validate_hunk_direction(&payload(true, false), HunkCommand::Stage).unwrap_err();
+        assert!(err.to_string().contains("unstaged diff"), "{err}");
+    }
+
+    #[test]
+    fn stage_rejects_an_untracked_hunk() {
+        let err = validate_hunk_direction(&payload(false, true), HunkCommand::Stage).unwrap_err();
+        assert!(err.to_string().contains("stage_file"), "{err}");
+    }
+
+    // ---- Unstage ----
+
+    #[test]
+    fn unstage_accepts_a_staged_hunk() {
+        let target = validate_hunk_direction(&payload(true, false), HunkCommand::Unstage);
+        assert!(matches!(target, Ok(ApplyTarget::IndexReverse)));
+    }
+
+    #[test]
+    fn unstage_rejects_an_unstaged_hunk() {
+        let err =
+            validate_hunk_direction(&payload(false, false), HunkCommand::Unstage).unwrap_err();
+        assert!(err.to_string().contains("staged diff"), "{err}");
+    }
+
+    // ---- Discard ----
+
+    #[test]
+    fn discard_accepts_unstaged_tracked_hunk() {
+        let target = validate_hunk_direction(&payload(false, false), HunkCommand::Discard);
+        assert!(matches!(target, Ok(ApplyTarget::WorkdirReverse)));
+    }
+
+    #[test]
+    fn discard_rejects_an_untracked_hunk_before_checking_direction() {
+        // Untracked takes precedence even when also staged.
+        let err = validate_hunk_direction(&payload(true, true), HunkCommand::Discard).unwrap_err();
+        assert!(err.to_string().contains("discard_file"), "{err}");
+    }
+
+    #[test]
+    fn discard_rejects_a_staged_hunk() {
+        let err = validate_hunk_direction(&payload(true, false), HunkCommand::Discard).unwrap_err();
+        assert!(err.to_string().contains("unstaged diff"), "{err}");
+    }
 }

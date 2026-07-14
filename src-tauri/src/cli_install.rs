@@ -8,11 +8,11 @@
 //! The launcher source is embedded at compile time (`include_str!`) so the
 //! installed command never depends on the project directory staying put.
 
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 /// The `gitrx` launcher, embedded at build time. Path is relative to this
@@ -36,13 +36,22 @@ enum InstallOutcome {
 ///
 /// Intended to run off the main thread; it may block on an elevation prompt and
 /// on the modal result dialog. All UI is surfaced through `AppHandle` dialogs.
-pub fn install_cli<R: Runtime>(app: AppHandle<R>) {
+pub fn install_cli<R: Runtime>(app: &AppHandle<R>) {
     let candidates: Vec<PathBuf> = CANDIDATE_DIRS.iter().map(PathBuf::from).collect();
 
-    let result = match choose_install_dir(&candidates) {
-        Some(dir) => install_directly(&dir),
-        None => install_elevated(),
-    };
+    let result = choose_install_dir(&candidates).map_or_else(
+        || match private_staging_dir(app) {
+            Ok(staging) => {
+                let outcome = install_elevated(&staging);
+                // Best-effort teardown of the private staging directory (and its
+                // staged copy) regardless of outcome.
+                let _ = std::fs::remove_dir_all(&staging);
+                outcome
+            }
+            Err(e) => Err(format!("Preparing installer: {e}")),
+        },
+        |dir| install_directly(&dir),
+    );
 
     match result {
         Ok(InstallOutcome::Installed(path)) => {
@@ -105,11 +114,12 @@ fn install_directly(dir: &Path) -> Result<InstallOutcome, String> {
     Ok(InstallOutcome::Installed(dest))
 }
 
-/// Escalate: stage the script in a private temp file, then run a single
-/// elevated `install(1)` via the native admin prompt. The script contents are
-/// never interpolated into the AppleScript — only the quoted temp path is.
-fn install_elevated() -> Result<InstallOutcome, String> {
-    let tmp = write_temp_script().map_err(|e| format!("Preparing installer: {e}"))?;
+/// Escalate: stage the script in `staging` (a caller-owned private 0700 dir),
+/// then run a single elevated `install(1)` via the native admin prompt. The
+/// script contents are never interpolated into the `AppleScript` — only the quoted
+/// staged path is.
+fn install_elevated(staging: &Path) -> Result<InstallOutcome, String> {
+    let tmp = write_temp_script(staging).map_err(|e| format!("Preparing installer: {e}"))?;
     let dest = format!("{ELEVATED_DIR}/{CMD}");
 
     let shell_cmd = format!(
@@ -156,16 +166,38 @@ fn write_script_0755(dest: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))
 }
 
-/// Stage the embedded script in a fresh, private (0600) temp file created with
-/// `O_EXCL`, so no pre-existing file or symlink can be clobbered.
-fn write_temp_script() -> std::io::Result<PathBuf> {
-    use std::io::Write;
+/// Create a fresh, private (0700) staging directory under the app's data dir.
+///
+/// Staging the elevated-install file here instead of the world-writable system
+/// temp dir removes the same-user TOCTOU swap window: `/tmp` is shared, so
+/// another local process could replace the staged file between our write and
+/// root's `install(1)` read. The app data dir is already user-private, and the
+/// 0700 subdir (created non-recursively, so it fails if a squatter pre-made it)
+/// means only this user's processes can even see the staged path.
+fn private_staging_dir<R: Runtime>(app: &AppHandle<R>) -> std::io::Result<PathBuf> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    std::fs::create_dir_all(&base)?;
 
-    let path = std::env::temp_dir().join(format!(
-        "{CMD}-install-{}-{}",
+    let dir = base.join(format!(
+        ".{CMD}-install-{}-{}",
         std::process::id(),
         unique_suffix()
     ));
+    // Non-recursive create → fails with AlreadyExists if a squatter pre-created
+    // it, so we never stage inside an attacker-controlled directory.
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    Ok(dir)
+}
+
+/// Stage the embedded script as `<staging>/gitrx` in a fresh, private (0600) file
+/// created with `O_EXCL`, so no pre-existing file or symlink can be clobbered.
+fn write_temp_script(staging: &Path) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+
+    let path = staging.join(CMD);
     let mut file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -179,8 +211,7 @@ fn write_temp_script() -> std::io::Result<PathBuf> {
 fn unique_suffix() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_nanos())
 }
 
 /// Wrap `s` in single quotes for `/bin/sh`, escaping embedded single quotes.
@@ -188,12 +219,12 @@ fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-/// Escape a string for embedding inside an AppleScript double-quoted literal.
+/// Escape a string for embedding inside an `AppleScript` double-quoted literal.
 fn applescript_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Detect the "user cancelled the auth dialog" case (AppleScript error -128).
+/// Detect the "user cancelled the auth dialog" case (`AppleScript` error -128).
 fn is_user_cancellation(stderr: &str) -> bool {
     stderr.contains("-128") || stderr.contains("User canceled")
 }
@@ -203,6 +234,15 @@ mod tests {
     use super::*;
     use std::fs;
 
+    // Mark `dir` read-only (0o555) so `is_writable_dir`'s create-probe fails.
+    //
+    // CAVEAT: running as root (e.g. some CI containers) bypasses Unix permission
+    // bits, so the probe can still create a file in a 0o555 directory. The two
+    // tests below that rely on this (`falls_through_to_second_writable_candidate`
+    // and `returns_none_when_no_candidate_is_writable`) then assert against a dir
+    // that is effectively still writable and pass vacuously. Documented, not
+    // fixed: making them meaningful under root would require dropping privileges,
+    // which is out of scope for a unit test.
     fn read_only(dir: &Path) {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
     }

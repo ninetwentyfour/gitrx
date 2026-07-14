@@ -61,8 +61,13 @@ struct LineStats {
 /// Uses `Repository::discover` so a path anywhere inside a working tree resolves
 /// to the enclosing repository.
 pub fn open_repository(path: &Path) -> AppResult<Repository> {
-    Repository::discover(path)
-        .map_err(|_| AppError::msg(format!("Not a git repository: {}", path.display())))
+    Repository::discover(path).map_err(|e| {
+        AppError::validation(format!(
+            "Not a git repository: {} ({})",
+            path.display(),
+            e.message()
+        ))
+    })
 }
 
 /// Resolve a CLI-provided path argument to an absolute, canonical directory.
@@ -78,9 +83,9 @@ pub fn open_repository(path: &Path) -> AppResult<Repository> {
 /// [`open_repository`].
 pub fn resolve_cli_repo_path(arg: &str) -> AppResult<PathBuf> {
     let canonical = std::fs::canonicalize(arg)
-        .map_err(|e| AppError::msg(format!("Cannot resolve path '{arg}': {e}")))?;
+        .map_err(|e| AppError::validation(format!("Cannot resolve path '{arg}': {e}")))?;
     if !canonical.is_dir() {
-        return Err(AppError::msg(format!(
+        return Err(AppError::validation(format!(
             "Not a directory: {}",
             canonical.display()
         )));
@@ -169,26 +174,28 @@ fn repo_name(repo: &Repository) -> String {
     repo.workdir()
         .and_then(|p| p.file_name())
         .or_else(|| repo.path().parent().and_then(|p| p.file_name()))
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "repository".to_string())
+        .map_or_else(
+            || "repository".to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        )
 }
 
 /// Returns `(branch label, head_has_commits)`.
 ///
 /// - Normal branch  -> shorthand ("main").
 /// - Detached HEAD  -> "(detached: <7-char oid>)".
-/// - Unborn HEAD    -> symbolic target ref name (empty repo), head_has_commits=false.
+/// - Unborn HEAD    -> symbolic target ref name (empty repo), `head_has_commits=false`.
 fn branch_info(repo: &Repository) -> (String, bool) {
     match repo.head() {
         Ok(head_ref) => {
             if repo.head_detached().unwrap_or(false) {
-                let short = head_ref
-                    .target()
-                    .map(|oid| {
+                let short = head_ref.target().map_or_else(
+                    || "unknown".to_string(),
+                    |oid| {
                         let full = oid.to_string();
                         full.chars().take(7).collect::<String>()
-                    })
-                    .unwrap_or_else(|| "unknown".to_string());
+                    },
+                );
                 (format!("(detached: {short})"), true)
             } else {
                 let name = head_ref.shorthand().unwrap_or("HEAD").to_string();
@@ -200,8 +207,10 @@ fn branch_info(repo: &Repository) -> (String, bool) {
                 .find_reference("HEAD")
                 .ok()
                 .and_then(|r| r.symbolic_target().map(str::to_string))
-                .map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_string())
-                .unwrap_or_else(|| "HEAD".to_string());
+                .map_or_else(
+                    || "HEAD".to_string(),
+                    |t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_string(),
+                );
             (name, false)
         }
         Err(_) => ("HEAD".to_string(), false),
@@ -318,20 +327,20 @@ fn rename_paths(
     delta: Option<git2::DiffDelta>,
     fallback: Option<&str>,
 ) -> (String, Option<String>) {
-    if let Some(delta) = delta {
-        let new_path = delta
-            .new_file()
-            .path()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry_path(fallback));
-        let old_path = delta
-            .old_file()
-            .path()
-            .map(|p| p.to_string_lossy().into_owned());
-        (new_path, old_path)
-    } else {
-        (entry_path(fallback), None)
-    }
+    delta.map_or_else(
+        || (entry_path(fallback), None),
+        |delta| {
+            let new_path = delta.new_file().path().map_or_else(
+                || entry_path(fallback),
+                |p| p.to_string_lossy().into_owned(),
+            );
+            let old_path = delta
+                .old_file()
+                .path()
+                .map(|p| p.to_string_lossy().into_owned());
+            (new_path, old_path)
+        },
+    )
 }
 
 fn entry_path(path: Option<&str>) -> String {
@@ -341,21 +350,10 @@ fn entry_path(path: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git2::{RepositoryInitOptions, Signature};
+    use crate::test_support::init_repo;
+    use git2::Signature;
     use std::fs;
     use tempfile::tempdir;
-
-    fn init_repo(dir: &Path) -> Repository {
-        let mut opts = RepositoryInitOptions::new();
-        opts.initial_head("main");
-        let repo = Repository::init_opts(dir, &opts).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "Test User").unwrap();
-            cfg.set_str("user.email", "test@example.com").unwrap();
-        }
-        repo
-    }
 
     fn commit_baseline(repo: &Repository, dir: &Path) {
         fs::write(dir.join("a.txt"), "line1\nline2\n").unwrap();
@@ -444,12 +442,23 @@ mod tests {
         // Absolute path resolves to itself.
         assert_eq!(resolve_cli_repo_path(sub.to_str().unwrap()).unwrap(), sub);
 
-        // Relative "." and ".." resolve against the process cwd.
-        let saved = std::env::current_dir().unwrap();
+        // Relative "." and ".." resolve against the process cwd. Restore the cwd
+        // through a drop guard so a failing assert below can't leak the mutated
+        // cwd into other tests in this binary.
+        let _guard = CwdGuard(std::env::current_dir().unwrap());
         std::env::set_current_dir(&sub).unwrap();
         assert_eq!(resolve_cli_repo_path(".").unwrap(), sub);
         assert_eq!(resolve_cli_repo_path("..").unwrap(), expected);
-        std::env::set_current_dir(saved).unwrap();
+    }
+
+    /// Restores the process current directory when dropped (including on panic),
+    /// so a cwd-mutating test cannot contaminate sibling tests.
+    struct CwdGuard(PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
     }
 
     #[test]

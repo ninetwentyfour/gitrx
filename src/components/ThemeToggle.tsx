@@ -22,7 +22,10 @@ export function ThemeToggle() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
 
-  const next = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length];
+  // ORDER holds every Theme, so `indexOf(theme)` is always valid and the modular
+  // successor is always in range; the `?? "system"` fallback is unreachable and
+  // only satisfies noUncheckedIndexedAccess.
+  const next = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length] ?? "system";
 
   return (
     <button

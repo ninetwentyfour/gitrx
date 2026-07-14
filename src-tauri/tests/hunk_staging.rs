@@ -10,56 +10,29 @@
 //! index / working-tree state via git2 and the `git` CLI.
 
 use std::path::Path;
-use std::process::Command;
 
-use git2::{Repository, RepositoryInitOptions, Signature};
-use tempfile::{tempdir, TempDir};
+use git2::Repository;
 
+use rust_gitx_lib::error::AppError;
 use rust_gitx_lib::git::{apply, diff, patch, stage};
 
 use apply::{apply_patch, ApplyTarget};
 use patch::{build_patch, HunkPatchPayload, PatchLine, PatchLineKind};
 
+// The shared git-layer fixtures. The library gates this module behind
+// `#[cfg(test)]` (invisible to an integration crate), and its `tempfile`
+// dependency stays dev-only, so we compile the SAME source directly into this
+// crate rather than importing it from `rust_gitx_lib`. See `src/test_support.rs`.
+#[path = "../src/test_support.rs"]
+mod test_support;
+
+use test_support::{commit_bytes, commit_file, git_cli, setup};
+
 // ---------------------------------------------------------------------------
-// Repo + payload helpers
+// Payload helpers
 // ---------------------------------------------------------------------------
 
-fn init_repo(dir: &Path) -> Repository {
-    let mut opts = RepositoryInitOptions::new();
-    opts.initial_head("main");
-    let repo = Repository::init_opts(dir, &opts).unwrap();
-    let mut cfg = repo.config().unwrap();
-    cfg.set_str("user.name", "Test User").unwrap();
-    cfg.set_str("user.email", "test@example.com").unwrap();
-    repo
-}
-
-/// Commit `content` (as raw bytes, no autocrlf munging) to `name`.
-fn commit_bytes(repo: &Repository, dir: &Path, name: &str, content: &[u8]) {
-    std::fs::write(dir.join(name), content).unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new(name)).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let sig = Signature::now("Test User", "test@example.com").unwrap();
-    let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-    repo.commit(Some("HEAD"), &sig, &sig, "commit", &tree, &parents)
-        .unwrap();
-}
-
-fn commit_file(repo: &Repository, dir: &Path, name: &str, content: &str) {
-    commit_bytes(repo, dir, name, content.as_bytes());
-}
-
-fn setup() -> (TempDir, Repository) {
-    let dir = tempdir().unwrap();
-    let repo = init_repo(dir.path());
-    (dir, repo)
-}
-
-fn map_kind(k: diff::DiffLineKind) -> PatchLineKind {
+const fn map_kind(k: diff::DiffLineKind) -> PatchLineKind {
     match k {
         diff::DiffLineKind::Context => PatchLineKind::Context,
         diff::DiffLineKind::Add => PatchLineKind::Add,
@@ -106,20 +79,6 @@ fn payload_from_hunk_ctx(
     }
 }
 
-/// Run the `git` CLI in `dir`, returning `(stdout, stderr, success)`.
-fn git_cli(dir: &Path, args: &[&str]) -> (String, String, bool) {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("git CLI runs");
-    (
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-        out.status.success(),
-    )
-}
-
 /// Raw bytes of the staged (index) blob for `name`, or `None` if absent.
 fn index_blob(repo: &Repository, name: &str) -> Option<Vec<u8>> {
     let mut index = repo.index().unwrap();
@@ -135,7 +94,11 @@ fn index_blob(repo: &Repository, name: &str) -> Option<Vec<u8>> {
 
 /// Baseline of `n` numbered lines, LF terminated.
 fn numbered(n: usize) -> String {
-    (1..=n).map(|i| format!("line{i}\n")).collect()
+    (1..=n).fold(String::new(), |mut s, i| {
+        use std::fmt::Write as _;
+        let _ = writeln!(s, "line{i}");
+        s
+    })
 }
 
 /// `numbered(n)` with the given 1-based lines replaced by `line{i}-changed`.
@@ -527,7 +490,7 @@ fn context_zero_hunk_applies_like_context_eight() {
 // ---------------------------------------------------------------------------
 
 /// Truncate an `@@` header line just after its closing `@@`, dropping the
-/// optional function-context section (which build_patch omits).
+/// optional function-context section (which `build_patch` omits).
 fn normalize_at_header(h: &str) -> String {
     if let Some(first) = h.find("@@") {
         if let Some(rel) = h[first + 2..].find("@@") {
@@ -578,14 +541,14 @@ fn build_patch_matches_git_hunk_slice_byte_for_byte() {
     let git_hunks = hunk_blocks(&git_diff);
     assert_eq!(git_hunks.len(), fd.hunks.len(), "hunk counts agree");
 
-    for i in 0..fd.hunks.len() {
+    for (i, git_hunk) in git_hunks.iter().enumerate() {
         let p = payload_from_hunk(&fd, i, false);
         let mine = String::from_utf8(build_patch(&p).unwrap()).unwrap();
         // Isolate the single @@ block from my patch (everything from `@@ ` on).
         let mine_block = hunk_blocks(&mine).pop().expect("my patch has a hunk");
         assert_eq!(
             normalize_block(&mine_block),
-            normalize_block(&git_hunks[i]),
+            normalize_block(git_hunk),
             "hunk {i} must match git's own slice"
         );
     }
@@ -613,6 +576,7 @@ fn corrupt_payload_returns_git_error() {
 
     let err = apply_patch(dir.path(), &build_patch(&p).unwrap(), ApplyTarget::Index)
         .expect_err("corrupt patch must fail");
+    assert!(matches!(err, AppError::Git { .. }), "{err:?}");
     let msg = err.to_string();
     assert!(
         msg.contains("apply"),
@@ -640,7 +604,7 @@ fn verified_apply_stages_the_selected_hunk() {
     assert!(cached.contains("+line15-changed"), "staged: {cached}");
 }
 
-/// The nastiest case: a context_lines=0 PURE-INSERTION hunk, then the file shifts
+/// The nastiest case: a `context_lines=0` PURE-INSERTION hunk, then the file shifts
 /// (a line is prepended) so the captured hunk's header no longer lines up. The
 /// verified pipeline must reject it and leave the index completely untouched.
 #[test]
@@ -664,6 +628,7 @@ fn stale_zero_context_insertion_is_rejected_and_index_untouched() {
 
     let err = stage::apply_hunk_verified(dir.path(), &payload, ApplyTarget::Index)
         .expect_err("stale hunk must be rejected");
+    assert!(matches!(err, AppError::StaleHunk { .. }), "{err:?}");
     assert!(
         err.to_string().contains("changed since"),
         "expected a freshness error, got: {err}"
@@ -695,6 +660,7 @@ fn double_apply_second_call_is_rejected_by_freshness() {
 
     let err = stage::apply_hunk_verified(dir.path(), &payload, ApplyTarget::Index)
         .expect_err("second apply must be rejected by the freshness check");
+    assert!(matches!(err, AppError::StaleHunk { .. }), "{err:?}");
     assert!(
         err.to_string().contains("changed since"),
         "expected a freshness error, got: {err}"
@@ -704,6 +670,81 @@ fn double_apply_second_call_is_rejected_by_freshness() {
     assert_eq!(
         cached_after_first, cached_after_second,
         "a rejected second apply must not change the index"
+    );
+}
+
+/// H2: a forged `old_path` on an otherwise-valid hunk payload — pointing at a
+/// clean, tracked victim — is rejected before any patch is built. Without the
+/// guard, `git apply` reads `diff --git a/victim b/f` as an implicit rename and
+/// stage-deletes the victim. The victim's index entry must be untouched.
+#[test]
+fn forged_old_path_is_rejected_and_victim_untouched() {
+    let (dir, repo) = setup();
+    commit_file(&repo, dir.path(), "f.txt", &numbered(10));
+    commit_file(&repo, dir.path(), "victim.txt", "keep me\n");
+    std::fs::write(dir.path().join("f.txt"), numbered_edited(10, &[5])).unwrap();
+
+    let fd = diff::file_diff(&repo, "f.txt", false, 3).unwrap();
+    let mut payload = payload_from_hunk_ctx(&fd, 0, false, 3);
+    payload.old_path = Some("victim.txt".to_string());
+
+    let err = stage::apply_hunk_verified(dir.path(), &payload, ApplyTarget::Index)
+        .expect_err("forged old_path must be rejected");
+    assert!(matches!(err, AppError::StaleHunk { .. }), "{err:?}");
+    assert!(
+        err.to_string().contains("changed since"),
+        "expected a freshness-style rejection, got: {err}"
+    );
+
+    // Victim still holds its committed blob (not stage-deleted).
+    assert_eq!(index_blob(&repo, "victim.txt").unwrap(), b"keep me\n");
+    let (cached, _, _) = git_cli(dir.path(), &["diff", "--cached"]);
+    assert!(
+        cached.trim().is_empty(),
+        "index must be untouched: {cached}"
+    );
+}
+
+/// H3: a hunk from a file containing non-UTF-8 bytes is refused (the
+/// reconstructed patch would write the U+FFFD-replaced bytes back and corrupt
+/// the file), while whole-file `stage_file` stays byte-exact.
+#[test]
+fn non_utf8_hunk_apply_is_rejected() {
+    let (dir, repo) = setup();
+    commit_bytes(&repo, dir.path(), "l.txt", b"cafe\n");
+    std::fs::write(dir.path().join("l.txt"), b"caf\xe9\n").unwrap();
+
+    let fd = diff::file_diff(&repo, "l.txt", false, 3).unwrap();
+    assert!(fd.is_lossy, "diff must flag non-UTF-8 as lossy");
+    let payload = payload_from_hunk_ctx(&fd, 0, false, 3);
+
+    let err = stage::apply_hunk_verified(dir.path(), &payload, ApplyTarget::Index)
+        .expect_err("lossy hunk must be rejected");
+    assert!(matches!(err, AppError::NonUtf8File { .. }), "{err:?}");
+    assert!(
+        err.to_string().contains("non-UTF-8"),
+        "expected a non-UTF-8 rejection, got: {err}"
+    );
+
+    let (cached, _, _) = git_cli(dir.path(), &["diff", "--cached"]);
+    assert!(
+        cached.trim().is_empty(),
+        "index must be untouched: {cached}"
+    );
+}
+
+#[test]
+fn non_utf8_file_stages_whole_file_byte_exact() {
+    let (dir, repo) = setup();
+    commit_bytes(&repo, dir.path(), "l.txt", b"cafe\n");
+    let raw: &[u8] = b"caf\xe9\nsecond\xff line\n";
+    std::fs::write(dir.path().join("l.txt"), raw).unwrap();
+
+    stage::stage_file(&repo, "l.txt").unwrap();
+    assert_eq!(
+        index_blob(&repo, "l.txt").unwrap(),
+        raw.to_vec(),
+        "whole-file staging must preserve the exact bytes"
     );
 }
 

@@ -80,32 +80,38 @@ bin=""
 
 resolve_candidate() {
 	# Accept a .app bundle, a MacOS dir, or a direct executable; echo the
-	# runnable binary path if usable, else echo nothing. $2 is the binary/app
-	# name expected inside a bundle (differs between the new and legacy bundles).
+	# runnable binary path if usable, else echo nothing. For a bundle, the
+	# executable name comes from the bundle's own Info.plist (the bundle is
+	# named after productName "gitrx" but the binary keeps the Cargo package
+	# name "rust-gitx" — never guess), with both known names as fallbacks.
 	c="$1"
-	name="$2"
 	if [ -d "$c" ]; then
-		if [ -x "$c/Contents/MacOS/$name" ]; then
-			printf '%s\n' "$c/Contents/MacOS/$name"
-		elif [ -x "$c/$name" ]; then
-			printf '%s\n' "$c/$name"
-		fi
+		exe=$(defaults read "$c/Contents/Info" CFBundleExecutable 2>/dev/null || true)
+		for name in "$exe" "$APP_NAME" "$LEGACY_APP_NAME"; do
+			[ -n "$name" ] || continue
+			if [ -x "$c/Contents/MacOS/$name" ]; then
+				printf '%s\n' "$c/Contents/MacOS/$name"
+				return 0
+			elif [ -x "$c/$name" ]; then
+				printf '%s\n' "$c/$name"
+				return 0
+			fi
+		done
 	elif [ -x "$c" ]; then
 		printf '%s\n' "$c"
 	fi
 }
 
-# 1. Explicit override. A bundle could carry either the new or legacy name.
+# 1. Explicit override.
 if [ -n "${GITRX_APP:-}" ]; then
-	bin=$(resolve_candidate "$GITRX_APP" "$APP_NAME")
-	[ -n "$bin" ] || bin=$(resolve_candidate "$GITRX_APP" "$LEGACY_APP_NAME")
+	bin=$(resolve_candidate "$GITRX_APP")
 	[ -n "$bin" ] || die "GITRX_APP is set but no runnable binary found at: $GITRX_APP"
 fi
 
 # 2 & 3. Installed locations (new bundle name).
 if [ -z "$bin" ]; then
 	for base in "/Applications/${APP_NAME}.app" "$HOME/Applications/${APP_NAME}.app"; do
-		bin=$(resolve_candidate "$base" "$APP_NAME")
+		bin=$(resolve_candidate "$base")
 		[ -n "$bin" ] && break
 	done
 fi
@@ -114,7 +120,7 @@ fi
 # still launches.
 if [ -z "$bin" ]; then
 	for base in "/Applications/${LEGACY_APP_NAME}.app" "$HOME/Applications/${LEGACY_APP_NAME}.app"; do
-		bin=$(resolve_candidate "$base" "$LEGACY_APP_NAME")
+		bin=$(resolve_candidate "$base")
 		[ -n "$bin" ] && break
 	done
 fi
@@ -124,7 +130,7 @@ if [ -z "$bin" ] && [ -n "$script_dir" ]; then
 	repo_root=$(dirname "$script_dir")
 	if [ -d "$repo_root/src-tauri" ]; then
 		dev_app="$repo_root/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
-		bin=$(resolve_candidate "$dev_app" "$APP_NAME")
+		bin=$(resolve_candidate "$dev_app")
 	fi
 fi
 

@@ -67,6 +67,11 @@ pub struct AppState {
     /// Backing selection for the native file context menu (see
     /// [`PendingCtxMenu`]).
     pub pending_ctx_menu: Mutex<Option<PendingCtxMenu>>,
+    /// Working-tree path of the most-recently-*opened* repository (updated on
+    /// every window↔repo bind). Backs the legacy `lastRepoPath` persistence key,
+    /// which must reflect open order — not the alphabetically-last path a sorted
+    /// snapshot would otherwise yield.
+    pub last_opened: Mutex<Option<PathBuf>>,
     /// Set once the app is tearing down (`RunEvent::ExitRequested`) so the
     /// per-window `Destroyed` handler does not rewrite the persisted open-repos
     /// set while every window closes on quit — that would clobber the very set we

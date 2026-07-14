@@ -5,13 +5,13 @@ import type { DiffTokens } from "../highlight/shiki";
 import { DiffLineRow } from "./DiffLineRow";
 import { HunkHeader } from "./HunkView";
 
-interface VirtualDiffProps {
+type VirtualDiffProps = {
   diff: FileDiff;
   staged: boolean;
   tokens: DiffTokens | null;
   /** The scrolling ancestor (`.diff-viewer__body`) the virtualizer measures. */
   scrollRef: RefObject<HTMLDivElement | null>;
-}
+};
 
 /** One flattened row of the virtual list: a hunk header or a single diff line. */
 type Row =
@@ -46,7 +46,7 @@ export function VirtualDiff({ diff, staged, tokens, scrollRef }: VirtualDiffProp
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => (rows[i].kind === "header" ? HEADER_ESTIMATE : LINE_ESTIMATE),
+    estimateSize: (i) => (rows[i]?.kind === "header" ? HEADER_ESTIMATE : LINE_ESTIMATE),
     overscan: 24,
   });
 
@@ -57,8 +57,23 @@ export function VirtualDiff({ diff, staged, tokens, scrollRef }: VirtualDiffProp
       data-virtualized="true"
     >
       {virtualizer.getVirtualItems().map((item) => {
+        // `rows` is derived from `diff.hunks`, so every virtual index maps to a
+        // real row/hunk; the guards narrow the `| undefined` from
+        // noUncheckedIndexedAccess and are not expected to fire.
         const row = rows[item.index];
+        if (!row) return null;
         const hunk = diff.hunks[row.hunkIndex];
+        if (!hunk) return null;
+
+        let content: React.ReactNode;
+        if (row.kind === "header") {
+          content = <HunkHeader hunk={hunk} staged={staged} />;
+        } else {
+          const line = hunk.lines[row.lineIndex];
+          if (!line) return null;
+          content = <DiffLineRow line={line} tokens={tokens?.[row.hunkIndex]?.[row.lineIndex]} />;
+        }
+
         return (
           <div
             key={item.key}
@@ -67,14 +82,7 @@ export function VirtualDiff({ diff, staged, tokens, scrollRef }: VirtualDiffProp
             className="diff-viewer__vrow"
             style={{ transform: `translateY(${item.start}px)` }}
           >
-            {row.kind === "header" ? (
-              <HunkHeader hunk={hunk} staged={staged} />
-            ) : (
-              <DiffLineRow
-                line={hunk.lines[row.lineIndex]}
-                tokens={tokens?.[row.hunkIndex]?.[row.lineIndex]}
-              />
-            )}
+            {content}
           </div>
         );
       })}

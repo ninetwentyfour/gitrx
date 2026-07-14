@@ -47,6 +47,12 @@ pub struct FileDiff {
     pub language: Option<String>,
     pub is_binary: bool,
     pub is_untracked: bool,
+    /// True when any line in any hunk contained bytes that are not valid UTF-8
+    /// (they were rendered lossily with U+FFFD replacement characters). The
+    /// frontend uses this to steer the user to whole-file staging, and
+    /// `apply_hunk_verified` refuses hunk staging for such a file because the
+    /// reconstructed patch would write the corrupted (replaced) bytes back.
+    pub is_lossy: bool,
     pub hunks: Vec<Hunk>,
 }
 
@@ -94,7 +100,7 @@ pub fn file_diff(
 
     let language = language_for_path(path);
 
-    let Some(idx) = find_delta_index(&diff, path) else {
+    let Some(mut idx) = find_delta_index(&diff, path) else {
         // No delta touches this path -> nothing to show.
         return Ok(FileDiff {
             path: path.to_string(),
@@ -102,17 +108,50 @@ pub fn file_diff(
             language,
             is_binary: false,
             is_untracked: false,
+            is_lossy: false,
             hunks: Vec::new(),
         });
     };
+
+    // M1: staged rename detection. The single-path pathspec above filters the
+    // old-side DELETED delta out of the diff *before* `find_similar` runs, so a
+    // `git mv a b` (+ edit) staged as a pair surfaces here only as an `Added`
+    // `b` — the rename can never be paired. When the staged delta comes back
+    // `Added`, re-run the staged diff WITHOUT the pathspec so both sides are
+    // present, run rename detection, and, if `path` is now the new side of a
+    // rename/copy, switch to that (diff, delta) so `old_path` and the real
+    // del/add body surface. Genuinely-new files stay `Added` and fall through.
+    let mut rescan: Option<Diff<'_>> = None;
+    if staged && diff.get_delta(idx).expect("delta index in range").status() == Delta::Added {
+        let mut full_opts = DiffOptions::new();
+        full_opts
+            .context_lines(context_lines)
+            .include_typechange(true)
+            .max_size(crate::git::MAX_DIFF_BYTES);
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        let mut full = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut full_opts))?;
+        let mut find = DiffFindOptions::new();
+        find.renames(true).copies(true);
+        full.find_similar(Some(&mut find))?;
+
+        if let Some(fi) = find_delta_by_new_path(&full, path) {
+            if matches!(
+                full.get_delta(fi).expect("delta index in range").status(),
+                Delta::Renamed | Delta::Copied
+            ) {
+                idx = fi;
+                rescan = Some(full);
+            }
+        }
+    }
+    let diff = rescan.as_ref().unwrap_or(&diff);
 
     let delta = diff.get_delta(idx).expect("delta index in range");
     let is_untracked = delta.status() == Delta::Untracked;
     let new_path = delta
         .new_file()
         .path()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string());
+        .map_or_else(|| path.to_string(), |p| p.to_string_lossy().into_owned());
     let old_path = match delta.status() {
         Delta::Renamed | Delta::Copied => delta
             .old_file()
@@ -122,7 +161,7 @@ pub fn file_diff(
         _ => None,
     };
 
-    let patch = Patch::from_diff(&diff, idx)?;
+    let patch = Patch::from_diff(diff, idx)?;
 
     // Binary files: libgit2 sets the binary flag once the patch is computed.
     if delta.new_file().is_binary() || delta.old_file().is_binary() || patch.is_none() {
@@ -132,12 +171,13 @@ pub fn file_diff(
             language,
             is_binary: true,
             is_untracked,
+            is_lossy: false,
             hunks: Vec::new(),
         });
     }
 
     let patch = patch.expect("patch present after None check");
-    let hunks = collect_hunks(&patch)?;
+    let (hunks, is_lossy) = collect_hunks(&patch)?;
 
     Ok(FileDiff {
         path: new_path,
@@ -145,6 +185,7 @@ pub fn file_diff(
         language,
         is_binary: false,
         is_untracked,
+        is_lossy,
         hunks,
     })
 }
@@ -167,9 +208,24 @@ fn find_delta_index(diff: &Diff, path: &str) -> Option<usize> {
     None
 }
 
+/// Find the delta whose **new-side** path matches `path` exactly.
+///
+/// Used by the staged rename rescan (M1): after re-running the diff without a
+/// pathspec, we must locate the rename by its target (new) path, not its source,
+/// so we don't accidentally pick up the old-side DELETED delta.
+fn find_delta_by_new_path(diff: &Diff, path: &str) -> Option<usize> {
+    let target = Path::new(path);
+    diff.deltas()
+        .position(|delta| delta.new_file().path() == Some(target))
+}
+
 /// Walk every hunk/line of `patch` into the serializable `Hunk` shape.
-fn collect_hunks(patch: &Patch) -> AppResult<Vec<Hunk>> {
+///
+/// Returns `(hunks, is_lossy)` where `is_lossy` is `true` if **any** body line
+/// carried bytes that are not valid UTF-8 (see [`line_content`]).
+fn collect_hunks(patch: &Patch) -> AppResult<(Vec<Hunk>, bool)> {
     let mut hunks = Vec::with_capacity(patch.num_hunks());
+    let mut is_lossy = false;
 
     for h in 0..patch.num_hunks() {
         let (hunk, _line_count) = patch.hunk(h)?;
@@ -180,7 +236,9 @@ fn collect_hunks(patch: &Patch) -> AppResult<Vec<Hunk>> {
 
         for l in 0..num_lines {
             let line = patch.line_in_hunk(h, l)?;
-            lines.push(convert_line(&line));
+            let (converted, lossy) = convert_line(&line);
+            is_lossy |= lossy;
+            lines.push(converted);
         }
 
         hunks.push(Hunk {
@@ -193,52 +251,85 @@ fn collect_hunks(patch: &Patch) -> AppResult<Vec<Hunk>> {
         });
     }
 
-    Ok(hunks)
+    Ok((hunks, is_lossy))
 }
 
 /// Map one libgit2 `DiffLine` to our contract line, including the special
 /// end-of-file "no newline" markers.
-fn convert_line(line: &git2::DiffLine) -> DiffLine {
+///
+/// Returns `(line, is_lossy)`; the no-newline marker is synthesized and never
+/// lossy.
+fn convert_line(line: &git2::DiffLine) -> (DiffLine, bool) {
     match line.origin_value() {
-        DiffLineType::ContextEOFNL | DiffLineType::AddEOFNL | DiffLineType::DeleteEOFNL => {
+        DiffLineType::ContextEOFNL | DiffLineType::AddEOFNL | DiffLineType::DeleteEOFNL => (
             DiffLine {
                 kind: DiffLineKind::NoNewline,
                 old_line_no: None,
                 new_line_no: None,
                 content: "\\ No newline at end of file".to_string(),
-            }
+            },
+            false,
+        ),
+        DiffLineType::Addition => {
+            let (content, lossy) = line_content(line);
+            (
+                DiffLine {
+                    kind: DiffLineKind::Add,
+                    old_line_no: None,
+                    new_line_no: line.new_lineno(),
+                    content,
+                },
+                lossy,
+            )
         }
-        DiffLineType::Addition => DiffLine {
-            kind: DiffLineKind::Add,
-            old_line_no: None,
-            new_line_no: line.new_lineno(),
-            content: line_content(line),
-        },
-        DiffLineType::Deletion => DiffLine {
-            kind: DiffLineKind::Del,
-            old_line_no: line.old_lineno(),
-            new_line_no: None,
-            content: line_content(line),
-        },
+        DiffLineType::Deletion => {
+            let (content, lossy) = line_content(line);
+            (
+                DiffLine {
+                    kind: DiffLineKind::Del,
+                    old_line_no: line.old_lineno(),
+                    new_line_no: None,
+                    content,
+                },
+                lossy,
+            )
+        }
         // Context and any other origin (file/hunk headers never appear in
         // `line_in_hunk`) are treated as context.
-        _ => DiffLine {
-            kind: DiffLineKind::Context,
-            old_line_no: line.old_lineno(),
-            new_line_no: line.new_lineno(),
-            content: line_content(line),
-        },
+        _ => {
+            let (content, lossy) = line_content(line);
+            (
+                DiffLine {
+                    kind: DiffLineKind::Context,
+                    old_line_no: line.old_lineno(),
+                    new_line_no: line.new_lineno(),
+                    content,
+                },
+                lossy,
+            )
+        }
     }
 }
 
-/// Lossy-utf8 line content with only the trailing `\n` stripped.
+/// Line content with only the trailing `\n` stripped, plus a `lossy` flag.
+///
+/// Fast path: valid UTF-8 bytes are decoded losslessly (`lossy = false`).
+/// Otherwise the bytes are rendered with [`String::from_utf8_lossy`] (U+FFFD
+/// replacements) and `lossy = true` — a signal callers use to refuse hunk
+/// staging, because the replaced bytes would corrupt the file if written back.
 ///
 /// A trailing `\r` is preserved on purpose: hunk staging round-trips this
 /// content back into a patch (`git/patch.rs`), and CRLF files only apply
 /// cleanly when the `\r` survives. Display layers strip it themselves.
-fn line_content(line: &git2::DiffLine) -> String {
-    let s = String::from_utf8_lossy(line.content());
-    s.strip_suffix('\n').unwrap_or(&s).to_string()
+fn line_content(line: &git2::DiffLine) -> (String, bool) {
+    let bytes = line.content();
+    std::str::from_utf8(bytes).map_or_else(
+        |_| {
+            let s = String::from_utf8_lossy(bytes);
+            (s.strip_suffix('\n').unwrap_or(&s).to_string(), true)
+        },
+        |s| (s.strip_suffix('\n').unwrap_or(s).to_string(), false),
+    )
 }
 
 /// Strip one trailing `\n` and, if present, the `\r` that precedes it.
@@ -251,6 +342,7 @@ fn trim_line(s: &str) -> String {
 /// Map a file path to a Shiki language id, or `None` when unknown.
 ///
 /// Checks special filenames first (Dockerfile, Makefile), then the extension.
+#[must_use]
 pub fn language_for_path(path: &str) -> Option<String> {
     let name = Path::new(path)
         .file_name()
@@ -303,48 +395,19 @@ pub fn language_for_path(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git2::{Repository, RepositoryInitOptions, Signature};
+    use crate::test_support::{commit_file, setup};
     use std::fs;
     use std::path::Path as StdPath;
-    use tempfile::{tempdir, TempDir};
-
-    fn init_repo(dir: &StdPath) -> Repository {
-        let mut opts = RepositoryInitOptions::new();
-        opts.initial_head("main");
-        let repo = Repository::init_opts(dir, &opts).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "Test User").unwrap();
-            cfg.set_str("user.email", "test@example.com").unwrap();
-        }
-        repo
-    }
-
-    fn commit_file(repo: &Repository, dir: &StdPath, name: &str, content: &str) {
-        fs::write(dir.join(name), content).unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(StdPath::new(name)).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = Signature::now("Test User", "test@example.com").unwrap();
-        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit> = parent.iter().collect();
-        repo.commit(Some("HEAD"), &sig, &sig, "commit", &tree, &parents)
-            .unwrap();
-    }
-
-    fn setup() -> (TempDir, Repository) {
-        let dir = tempdir().unwrap();
-        let repo = init_repo(dir.path());
-        (dir, repo)
-    }
 
     #[test]
     fn two_regions_split_by_context() {
         let (dir, repo) = setup();
         // 20-line baseline.
-        let base: String = (1..=20).map(|n| format!("line{n}\n")).collect();
+        let base: String = (1..=20).fold(String::new(), |mut s, n| {
+            use std::fmt::Write as _;
+            let _ = writeln!(s, "line{n}");
+            s
+        });
         commit_file(&repo, dir.path(), "f.txt", &base);
 
         // Edit line 3 and line 17 (far apart) -> two separated regions.
@@ -407,12 +470,12 @@ mod tests {
         assert_eq!(d.hunks.len(), 1);
         assert_eq!(d.language.as_deref(), Some("rust"));
 
-        let adds: Vec<_> = d.hunks[0]
+        let adds = d.hunks[0]
             .lines
             .iter()
             .filter(|l| l.kind == DiffLineKind::Add)
-            .collect();
-        assert_eq!(adds.len(), 3, "one add per file line");
+            .count();
+        assert_eq!(adds, 3, "one add per file line");
         assert!(d.hunks[0].lines.iter().all(|l| l.kind == DiffLineKind::Add));
     }
 
@@ -466,7 +529,11 @@ mod tests {
     #[test]
     fn zero_context_has_no_context_lines() {
         let (dir, repo) = setup();
-        let base: String = (1..=10).map(|n| format!("l{n}\n")).collect();
+        let base: String = (1..=10).fold(String::new(), |mut s, n| {
+            use std::fmt::Write as _;
+            let _ = writeln!(s, "l{n}");
+            s
+        });
         commit_file(&repo, dir.path(), "z.txt", &base);
 
         let mut lines: Vec<String> = (1..=10).map(|n| format!("l{n}")).collect();
@@ -563,6 +630,104 @@ mod tests {
         let d = file_diff(&repo, "grow.txt", false, 3).unwrap();
         assert!(d.is_binary, "oversized workdir side must render as binary");
         assert!(d.hunks.is_empty());
+    }
+
+    // H3: a line carrying a non-UTF-8 byte (0xE9, Latin-1 'é') must set
+    // `is_lossy` so callers can steer to whole-file staging. The hunk itself
+    // still renders (no NUL -> not binary), but its bytes went through the lossy
+    // U+FFFD path.
+    #[test]
+    fn non_utf8_content_marks_diff_lossy() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "latin1.txt", "cafe\n");
+        fs::write(dir.path().join("latin1.txt"), b"caf\xe9\n").unwrap();
+
+        let d = file_diff(&repo, "latin1.txt", false, 3).unwrap();
+        assert!(d.is_lossy, "non-UTF-8 bytes must flag isLossy");
+        assert!(!d.is_binary, "a lone high byte is text, not binary");
+        assert!(!d.hunks.is_empty());
+    }
+
+    #[test]
+    fn valid_utf8_content_is_not_lossy() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "u.txt", "one\n");
+        fs::write(dir.path().join("u.txt"), "one\ntwö\n").unwrap();
+
+        let d = file_diff(&repo, "u.txt", false, 3).unwrap();
+        assert!(
+            !d.is_lossy,
+            "valid UTF-8 (incl. multibyte) must not be lossy"
+        );
+    }
+
+    // M1: the single-path pathspec filters the old-side DELETED delta out before
+    // find_similar can pair it, so a staged `git mv a b` (+ edit) used to surface
+    // as a pure ADD of `b`. The rescan must re-detect the rename: old_path
+    // populated, and a real del/add body (not pure adds).
+    #[test]
+    fn staged_rename_reports_old_path_and_edit_body() {
+        let (dir, repo) = setup();
+        let body: String = (1..=20).fold(String::new(), |mut s, n| {
+            use std::fmt::Write as _;
+            let _ = writeln!(s, "line{n}");
+            s
+        });
+        commit_file(&repo, dir.path(), "a.txt", &body);
+
+        // Rename on disk + one-line edit, then stage the rename in the index.
+        let edited: String = (1..=20)
+            .map(|n| {
+                if n == 5 {
+                    "line5-changed\n".to_string()
+                } else {
+                    format!("line{n}\n")
+                }
+            })
+            .collect();
+        fs::remove_file(dir.path().join("a.txt")).unwrap();
+        fs::write(dir.path().join("b.txt"), &edited).unwrap();
+        let mut index = repo.index().unwrap();
+        index.remove_path(StdPath::new("a.txt")).unwrap();
+        index.add_path(StdPath::new("b.txt")).unwrap();
+        index.write().unwrap();
+
+        let d = file_diff(&repo, "b.txt", true, 3).unwrap();
+        assert_eq!(
+            d.old_path.as_deref(),
+            Some("a.txt"),
+            "staged rename must surface old_path"
+        );
+        let has_del = d
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .any(|l| l.kind == DiffLineKind::Del);
+        let has_add = d
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .any(|l| l.kind == DiffLineKind::Add);
+        assert!(
+            has_del && has_add,
+            "expected a del/add edit body, not a pure-add file"
+        );
+    }
+
+    // A genuinely new staged file must stay Added (no false rename from the
+    // rescan) and carry no old_path.
+    #[test]
+    fn staged_new_file_has_no_old_path() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "seed.txt", "seed\n");
+        fs::write(dir.path().join("brand-new.txt"), "hello\nworld\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(StdPath::new("brand-new.txt")).unwrap();
+        index.write().unwrap();
+
+        let d = file_diff(&repo, "brand-new.txt", true, 3).unwrap();
+        assert!(d.old_path.is_none(), "a new file must not report a rename");
+        assert!(!d.hunks.is_empty());
     }
 
     #[test]

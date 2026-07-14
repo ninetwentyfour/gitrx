@@ -39,7 +39,7 @@ pub fn mime_from_extension(path: &str) -> AppResult<&'static str> {
         .map(|e| e.to_string_lossy().to_ascii_lowercase());
     let ext = ext
         .as_deref()
-        .ok_or_else(|| AppError::msg("File has no extension; not a supported image"))?;
+        .ok_or_else(|| AppError::validation("File has no extension; not a supported image"))?;
 
     let mime = match ext {
         "png" => "image/png",
@@ -49,7 +49,11 @@ pub fn mime_from_extension(path: &str) -> AppResult<&'static str> {
         "bmp" => "image/bmp",
         "ico" => "image/x-icon",
         "avif" => "image/avif",
-        other => return Err(AppError::msg(format!("Unsupported image type: .{other}"))),
+        other => {
+            return Err(AppError::validation(format!(
+                "Unsupported image type: .{other}"
+            )))
+        }
     };
     Ok(mime)
 }
@@ -85,12 +89,26 @@ pub fn read_image_data(
 fn read_workdir_file(repo: &Repository, path: &str, max_bytes: usize) -> AppResult<Vec<u8>> {
     let workdir = repo
         .workdir()
-        .ok_or_else(|| AppError::msg("Repository has no working tree"))?;
+        .ok_or_else(|| AppError::validation("Repository has no working tree"))?;
     let full = workdir.join(path);
 
-    let meta = std::fs::metadata(&full)?;
-    if meta.len() as usize > max_bytes {
-        return Err(too_large(meta.len() as usize, max_bytes));
+    // Reject symlinks *before* reading (`symlink_metadata` does not follow the
+    // link): a symlink inside the working tree could point outside the repo, so
+    // following it would let an image-preview request read an arbitrary file. The
+    // path string itself is already lexically validated upstream; this closes the
+    // in-tree-symlink escape.
+    let meta = std::fs::symlink_metadata(&full)?;
+    if meta.file_type().is_symlink() {
+        return Err(AppError::validation(format!(
+            "Refusing to read '{path}': it is a symbolic link"
+        )));
+    }
+    // Compare in `u64` so no cast is needed on the hot path; only build the
+    // `usize` actual-size for the error message, saturating on 32-bit targets
+    // (macOS is 64-bit, where this is exact and lossless).
+    if meta.len() > max_bytes as u64 {
+        let actual = usize::try_from(meta.len()).unwrap_or(usize::MAX);
+        return Err(too_large(actual, max_bytes));
     }
     Ok(std::fs::read(&full)?)
 }
@@ -98,9 +116,9 @@ fn read_workdir_file(repo: &Repository, path: &str, max_bytes: usize) -> AppResu
 /// Read the blob recorded in the index (stage 0) for `path`.
 fn read_staged_blob(repo: &Repository, path: &str, max_bytes: usize) -> AppResult<Vec<u8>> {
     let index = repo.index()?;
-    let entry = index
-        .get_path(Path::new(path), 0)
-        .ok_or_else(|| AppError::msg(format!("No staged version of '{path}' in the index")))?;
+    let entry = index.get_path(Path::new(path), 0).ok_or_else(|| {
+        AppError::validation(format!("No staged version of '{path}' in the index"))
+    })?;
     let blob = repo.find_blob(entry.id)?;
     let content = blob.content();
     if content.len() > max_bytes {
@@ -110,7 +128,7 @@ fn read_staged_blob(repo: &Repository, path: &str, max_bytes: usize) -> AppResul
 }
 
 fn too_large(actual: usize, max_bytes: usize) -> AppError {
-    AppError::msg(format!(
+    AppError::validation(format!(
         "Image is too large ({actual} bytes); the maximum is {max_bytes} bytes"
     ))
 }
@@ -118,10 +136,9 @@ fn too_large(actual: usize, max_bytes: usize) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git2::RepositoryInitOptions;
+    use crate::test_support::setup;
     use std::fs;
     use std::path::Path as StdPath;
-    use tempfile::{tempdir, TempDir};
 
     /// The smallest possible valid PNG: an 8-byte signature followed by a
     /// zero-length IHDR-less stream is *not* a real PNG, so we embed a genuine
@@ -133,24 +150,6 @@ mod tests {
         0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
         0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
-
-    fn init_repo(dir: &StdPath) -> Repository {
-        let mut opts = RepositoryInitOptions::new();
-        opts.initial_head("main");
-        let repo = Repository::init_opts(dir, &opts).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "Test User").unwrap();
-            cfg.set_str("user.email", "test@example.com").unwrap();
-        }
-        repo
-    }
-
-    fn setup() -> (TempDir, Repository) {
-        let dir = tempdir().unwrap();
-        let repo = init_repo(dir.path());
-        (dir, repo)
-    }
 
     #[test]
     fn mime_from_extension_allow_list() {
@@ -205,6 +204,23 @@ mod tests {
             decoded, TINY_PNG,
             "staged read must come from the index blob"
         );
+    }
+
+    #[test]
+    fn rejects_workdir_symlink() {
+        // A symlink in the working tree (even one that resolves to a real image)
+        // must be refused rather than followed — it is the in-tree path-escape
+        // vector.
+        let (dir, repo) = setup();
+        let real = dir.path().join("real.png");
+        fs::write(&real, TINY_PNG).unwrap();
+        let link = dir.path().join("link.png");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let err = read_image_data(&repo, "link.png", false, MAX_IMAGE_BYTES)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("symbolic link"), "{err}");
     }
 
     #[test]

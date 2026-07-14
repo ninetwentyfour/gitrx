@@ -140,12 +140,17 @@ type ImageState = { status: "loading" } | { status: "loaded"; src: string } | { 
  */
 function BinaryNotice({ path, staged }: { path: string; staged: boolean }) {
   const busy = useAppStore((s) => s.busy);
+  const currentDiff = useAppStore((s) => s.currentDiff);
   const stageFile = useAppStore((s) => s.stageFile);
   const unstageFile = useAppStore((s) => s.unstageFile);
 
   const isImage = IMAGE_EXTS.has(extensionOf(path));
   const [image, setImage] = useState<ImageState>({ status: "loading" });
 
+  // Keyed on `currentDiff` identity (not just path/staged) so an on-disk edit that
+  // produces a NEW diff object for the SAME path re-fetches the preview instead of
+  // showing the stale image. The stale-guard below still discards a late result if
+  // the diff changes again mid-fetch.
   useEffect(() => {
     if (!isImage) return;
     // Stale-guard: if the selection changes mid-fetch, ignore the late result.
@@ -161,7 +166,7 @@ function BinaryNotice({ path, staged }: { path: string; staged: boolean }) {
     return () => {
       active = false;
     };
-  }, [path, staged, isImage]);
+  }, [path, staged, isImage, currentDiff]);
 
   const showPreview = isImage && image.status !== "error";
 

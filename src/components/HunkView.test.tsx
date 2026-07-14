@@ -1,38 +1,28 @@
+/**
+ * HunkView Tests
+ *
+ * The per-hunk action toolbar rendered inside the diff viewer. Verifies the
+ * correct Stage/Discard vs Unstage buttons appear for the file's side and that
+ * clicks dispatch the matching store action with the hunk payload.
+ *
+ * Key behaviors:
+ * - Unstaged hunk: enabled Stage + Discard, no Unstage; clicks call stageHunk/discardHunk
+ * - Staged hunk: enabled Unstage only; click calls unstageHunk
+ * - `busy` disables every button
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { HunkView } from "./HunkView";
 import { useAppStore } from "../store/useAppStore";
-import type { Hunk } from "../types/ipc";
+import { makeHunk } from "../test/factories";
 
-vi.mock("../api/git", () => ({
-  getStatus: vi.fn(),
-  getDiff: vi.fn(),
-  openRepo: vi.fn(),
-  pickRepoFolder: vi.fn(),
-  stageFile: vi.fn(),
-  unstageFile: vi.fn(),
-  discardFile: vi.fn(),
-  stageHunk: vi.fn(),
-  unstageHunk: vi.fn(),
-  discardHunk: vi.fn(),
-}));
+vi.mock("../api/git", async () => (await import("../test/factories")).mockGitApi());
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   confirm: vi.fn(),
 }));
 
-const hunk: Hunk = {
-  header: "@@ -1,3 +1,3 @@ fn main()",
-  oldStart: 1,
-  oldLines: 3,
-  newStart: 1,
-  newLines: 3,
-  lines: [
-    { kind: "context", oldLineNo: 1, newLineNo: 1, content: "a" },
-    { kind: "del", oldLineNo: 2, newLineNo: null, content: "b" },
-    { kind: "add", oldLineNo: null, newLineNo: 2, content: "B" },
-  ],
-};
+const hunk = makeHunk({ header: "@@ -1,3 +1,3 @@ fn main()" });
 
 beforeEach(() => {
   useAppStore.setState({

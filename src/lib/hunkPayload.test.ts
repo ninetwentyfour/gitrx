@@ -1,37 +1,40 @@
+/**
+ * toHunkPayload Tests
+ *
+ * The pure mapping from a rendered `FileDiff` + `Hunk` to the `HunkPatchPayload`
+ * the backend patch builder consumes. The critical invariant: `content` is
+ * carried BYTE-VERBATIM (trailing `\r` preserved) and line numbers are dropped.
+ *
+ * Key behaviors:
+ * - Maps path/oldPath/isUntracked/header/lines; drops oldLineNo/newLineNo
+ * - staged flag and contextLines pass through verbatim
+ * - Trailing `\r` preserved (CRLF byte-exactness); noNewline markers pass through
+ */
 import { describe, expect, it } from "vitest";
 import type { FileDiff, Hunk } from "../types/ipc";
+import { makeDiff as baseDiff, makeDiffLine, makeHunk as baseHunk } from "../test/factories";
 import { toHunkPayload } from "./hunkPayload";
 
+/** The mapping fixture: a rust file with a 4-line context/del/add/context hunk. */
 function makeHunk(overrides: Partial<Hunk> = {}): Hunk {
-  return {
+  return baseHunk({
     header: "@@ -1,3 +1,3 @@ fn main()",
-    oldStart: 1,
-    oldLines: 3,
-    newStart: 1,
-    newLines: 3,
     lines: [
-      { kind: "context", oldLineNo: 1, newLineNo: 1, content: "a" },
-      { kind: "del", oldLineNo: 2, newLineNo: null, content: "b" },
-      { kind: "add", oldLineNo: null, newLineNo: 2, content: "B" },
-      { kind: "context", oldLineNo: 3, newLineNo: 3, content: "c" },
+      makeDiffLine({ kind: "context", oldLineNo: 1, newLineNo: 1, content: "a" }),
+      makeDiffLine({ kind: "del", oldLineNo: 2, newLineNo: null, content: "b" }),
+      makeDiffLine({ kind: "add", oldLineNo: null, newLineNo: 2, content: "B" }),
+      makeDiffLine({ kind: "context", oldLineNo: 3, newLineNo: 3, content: "c" }),
     ],
     ...overrides,
-  };
+  });
 }
 
 function makeDiff(overrides: Partial<FileDiff> = {}): FileDiff {
-  return {
-    path: "src/main.rs",
-    language: "rust",
-    isBinary: false,
-    isUntracked: false,
-    hunks: [],
-    ...overrides,
-  };
+  return baseDiff({ path: "src/main.rs", language: "rust", ...overrides });
 }
 
 describe("toHunkPayload", () => {
-  it("maps path, isUntracked, header and line kind/content, dropping line numbers", () => {
+  it("maps path/header/line kind+content, drops line numbers, passes staged+contextLines through", () => {
     const diff = makeDiff();
     const hunk = makeHunk();
 
@@ -50,16 +53,12 @@ describe("toHunkPayload", () => {
     ]);
     // Line numbers must not leak into the payload.
     expect(payload.lines.every((l) => !("oldLineNo" in l) && !("newLineNo" in l))).toBe(true);
-  });
 
-  it("carries the staged flag through verbatim", () => {
-    const payload = toHunkPayload(makeDiff(), makeHunk(), true, 3);
-    expect(payload.staged).toBe(true);
-  });
-
-  it("includes the contextLines the diff was rendered with", () => {
-    expect(toHunkPayload(makeDiff(), makeHunk(), false, 0).contextLines).toBe(0);
-    expect(toHunkPayload(makeDiff(), makeHunk(), false, 8).contextLines).toBe(8);
+    // staged flag and contextLines are carried through verbatim (folded from the
+    // former one-line pass-through tests).
+    expect(toHunkPayload(diff, hunk, true, 3).staged).toBe(true);
+    expect(toHunkPayload(diff, hunk, false, 0).contextLines).toBe(0);
+    expect(toHunkPayload(diff, hunk, false, 8).contextLines).toBe(8);
   });
 
   it("carries oldPath for renames and isUntracked for untracked files", () => {
@@ -73,9 +72,9 @@ describe("toHunkPayload", () => {
   it("preserves a trailing \\r in content (CRLF byte-exactness)", () => {
     const hunk = makeHunk({
       lines: [
-        { kind: "context", oldLineNo: 1, newLineNo: 1, content: "a\r" },
-        { kind: "del", oldLineNo: 2, newLineNo: null, content: "b\r" },
-        { kind: "add", oldLineNo: null, newLineNo: 2, content: "B\r" },
+        makeDiffLine({ kind: "context", oldLineNo: 1, newLineNo: 1, content: "a\r" }),
+        makeDiffLine({ kind: "del", oldLineNo: 2, newLineNo: null, content: "b\r" }),
+        makeDiffLine({ kind: "add", oldLineNo: null, newLineNo: 2, content: "B\r" }),
       ],
     });
 
@@ -87,14 +86,14 @@ describe("toHunkPayload", () => {
   it("carries noNewline marker lines through unchanged", () => {
     const hunk = makeHunk({
       lines: [
-        { kind: "context", oldLineNo: 1, newLineNo: 1, content: "x" },
-        { kind: "add", oldLineNo: null, newLineNo: 2, content: "yEDIT" },
-        {
+        makeDiffLine({ kind: "context", oldLineNo: 1, newLineNo: 1, content: "x" }),
+        makeDiffLine({ kind: "add", oldLineNo: null, newLineNo: 2, content: "yEDIT" }),
+        makeDiffLine({
           kind: "noNewline",
           oldLineNo: null,
           newLineNo: null,
           content: "\\ No newline at end of file",
-        },
+        }),
       ],
     });
 

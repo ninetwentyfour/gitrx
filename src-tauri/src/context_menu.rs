@@ -62,7 +62,7 @@ impl CtxAction {
     /// Whether this action is valid for a selection taken from the given panel.
     /// `Unstage` is staged-only; `Stage`/`Ignore`/`Discard`/`Trash` are
     /// unstaged-only; `Open`/`Reveal` are valid from either.
-    fn matches_panel(self, staged: bool) -> bool {
+    const fn matches_panel(self, staged: bool) -> bool {
         match self {
             Self::Unstage => staged,
             Self::Stage | Self::Ignore | Self::Discard | Self::Trash => !staged,
@@ -92,9 +92,9 @@ pub async fn show_file_context_menu(
     app: AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let repo_path = repo_path_for_window(&app, window.label())
-        .ok_or_else(|| "No repository open".to_string())?;
+) -> Result<(), AppError> {
+    let repo_path =
+        repo_path_for_window(&app, window.label()).ok_or_else(AppError::no_repo_open)?;
 
     // Lexically validate every path up front; silently drop malformed ones
     // rather than failing the whole menu.
@@ -109,12 +109,12 @@ pub async fn show_file_context_menu(
     // Re-derive status off the async worker (git2 handles are not `Send`).
     let derived = {
         let repo_path = repo_path.clone();
-        tauri::async_runtime::spawn_blocking(move || -> Result<Derived, String> {
+        tauri::async_runtime::spawn_blocking(move || -> Result<Derived, AppError> {
             let repo = open_repository(&repo_path)?;
-            Ok(derive_selection(&repo, &candidates, staged)?)
+            derive_selection(&repo, &candidates, staged)
         })
         .await
-        .map_err(|e| format!("Failed to derive file status: {e}"))??
+        .map_err(|e| AppError::git(format!("Failed to derive file status: {e}")))??
     };
 
     if derived.paths.is_empty() {
@@ -127,7 +127,7 @@ pub async fn show_file_context_menu(
         let mut guard = state
             .pending_ctx_menu
             .lock()
-            .map_err(|_| "Internal state lock poisoned".to_string())?;
+            .map_err(|_| AppError::git("Internal state lock poisoned"))?;
         *guard = Some(PendingCtxMenu {
             paths: derived.paths.clone(),
             staged,
@@ -135,12 +135,13 @@ pub async fn show_file_context_menu(
         });
     }
 
-    let menu = build_menu(&app, &derived).map_err(|e| format!("Failed to build menu: {e}"))?;
+    let menu = build_menu(&app, &derived)
+        .map_err(|e| AppError::git(format!("Failed to build menu: {e}")))?;
 
     // Pop the menu on the window that requested it (not a hardcoded "main").
     window
         .popup_menu(&menu)
-        .map_err(|e| format!("Failed to show context menu: {e}"))?;
+        .map_err(|e| AppError::git(format!("Failed to show context menu: {e}")))?;
 
     Ok(())
 }
@@ -214,7 +215,7 @@ fn status_map(repo: &Repository) -> AppResult<HashMap<String, Status>> {
 
 /// A file is untracked when it is present in the working tree but absent from
 /// the index (`WT_NEW`).
-fn is_untracked(status: Status) -> bool {
+const fn is_untracked(status: Status) -> bool {
     status.contains(Status::WT_NEW)
 }
 
@@ -264,7 +265,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, derived: &Derived) -> tauri::Resul
         }
     }
 
-    let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items.iter().map(|b| b.as_ref()).collect();
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items.iter().map(AsRef::as_ref).collect();
     Menu::with_items(app, &refs)
 }
 
@@ -300,8 +301,7 @@ fn selection_label(paths: &[String]) -> String {
 fn basename(path: &str) -> String {
     Path::new(path)
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
+        .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 /// Route a `ctx:*` menu event. Called from `menu::handle_menu_event`; ignores
@@ -318,12 +318,15 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 }
 
 /// Execute a resolved context-menu action against the pending selection.
+// This is a flat per-action dispatch over a git-mutating command surface;
+// splitting it would scatter the action match and obscure the sequential flow
+// without any behavior benefit, so the length lint is silenced here.
+#[allow(clippy::too_many_lines)]
 async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
     let pending = {
         let state = app.state::<AppState>();
-        let guard = match state.pending_ctx_menu.lock() {
-            Ok(g) => g,
-            Err(_) => return,
+        let Ok(guard) = state.pending_ctx_menu.lock() else {
+            return;
         };
         guard.clone()
     };
@@ -349,11 +352,15 @@ async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
         _ => {}
     }
 
-    // Discard asks for confirmation before touching anything.
+    // Discard asks for confirmation before touching anything. Use the async
+    // callback dialog (not `blocking_show`): this runs inside a spawned async
+    // task, and `blocking_show` would park a tokio worker for the entire time the
+    // modal sits open on user think-time. The callback returns immediately and we
+    // await the result over a oneshot, yielding the worker meanwhile.
     if action == CtxAction::Discard {
         let label = selection_label(&paths);
-        let confirmed = app
-            .dialog()
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.dialog()
             .message(format!(
                 "Discard changes to {label}? This cannot be undone."
             ))
@@ -363,8 +370,12 @@ async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
                 "Discard".to_string(),
                 "Cancel".to_string(),
             ))
-            .blocking_show();
-        if !confirmed {
+            .show(move |confirmed| {
+                let _ = tx.send(confirmed);
+            });
+        // A dropped sender (dialog closed without firing the callback) is treated
+        // as "not confirmed" — never discard on ambiguity.
+        if !rx.await.unwrap_or(false) {
             return;
         }
     }
@@ -395,7 +406,7 @@ async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
             CtxAction::Ignore => {
                 let workdir = repo
                     .workdir()
-                    .ok_or_else(|| AppError::msg("Repository has no working tree"))?;
+                    .ok_or_else(|| AppError::validation("Repository has no working tree"))?;
                 append_gitignore_entries(workdir, &paths)?;
                 Ok("fs")
             }
@@ -404,7 +415,7 @@ async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
                 for path in &paths {
                     // Only tracked files have working-tree changes to discard;
                     // untracked ones are handled via Move to Trash.
-                    if map.get(path).map(|s| !is_untracked(*s)).unwrap_or(false) {
+                    if map.get(path).is_some_and(|s| !is_untracked(*s)) {
                         discard_file(&repo, path)?;
                     }
                 }
@@ -413,11 +424,11 @@ async fn run_action<R: Runtime>(app: AppHandle<R>, action: CtxAction) {
             CtxAction::Trash => {
                 let workdir = repo
                     .workdir()
-                    .ok_or_else(|| AppError::msg("Repository has no working tree"))?;
+                    .ok_or_else(|| AppError::validation("Repository has no working tree"))?;
                 for path in &paths {
                     let full = workdir.join(path);
                     trash::delete(&full)
-                        .map_err(|e| AppError::msg(format!("Failed to trash '{path}': {e}")))?;
+                        .map_err(|e| AppError::io(format!("Failed to trash '{path}': {e}")))?;
                 }
                 Ok("fs")
             }
@@ -477,20 +488,51 @@ fn surface_error<R: Runtime>(app: &AppHandle<R>, message: &str) {
     });
 }
 
+/// Escape a repo-relative path into a *literal* `.gitignore` pattern body (the
+/// caller prepends the anchoring `/`).
+///
+/// gitignore is glob-based: `* ? [ ]` are wildcards, a leading `!`/`#` marks
+/// negation/comment, `\` is the escape char, and unescaped trailing whitespace is
+/// stripped. A raw filename containing any of these would match the wrong files
+/// (or, for `[`, form a broken pattern). Backslash-escaping them makes the
+/// pattern match the file's actual name and nothing else. `!`/`#` are escaped
+/// defensively even though our leading `/` keeps them off the line start.
+fn escape_gitignore_pattern(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() + 8);
+    for ch in path.chars() {
+        if matches!(ch, '*' | '?' | '[' | ']' | '!' | '#' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    // Escape any trailing spaces/tabs, which gitignore would otherwise trim.
+    let trimmed_len = out.trim_end_matches([' ', '\t']).len();
+    if trimmed_len < out.len() {
+        let mut tail = String::with_capacity((out.len() - trimmed_len) * 2);
+        for c in out[trimmed_len..].chars() {
+            tail.push('\\');
+            tail.push(c);
+        }
+        out.truncate(trimmed_len);
+        out.push_str(&tail);
+    }
+    out
+}
+
 /// Append repo-relative `rel_paths` to `<workdir>/.gitignore`, each as a
-/// leading-slash anchored pattern on its own line. Creates the file if missing
-/// and skips any line that already exists verbatim (dedupe).
+/// leading-slash anchored, glob-escaped pattern on its own line. Creates the file
+/// if missing and skips any line that already exists verbatim (dedupe).
 ///
 /// Pure filesystem logic, factored out for direct unit testing.
 pub fn append_gitignore_entries(workdir: &Path, rel_paths: &[String]) -> AppResult<()> {
     let gitignore = workdir.join(".gitignore");
     let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
-    let existing_lines: HashSet<String> = existing.lines().map(|l| l.to_string()).collect();
+    let existing_lines: HashSet<String> = existing.lines().map(str::to_string).collect();
 
     let mut seen: HashSet<String> = HashSet::new();
     let mut to_add: Vec<String> = Vec::new();
     for path in rel_paths {
-        let line = format!("/{path}");
+        let line = format!("/{}", escape_gitignore_pattern(path));
         if existing_lines.contains(&line) || !seen.insert(line.clone()) {
             continue;
         }
@@ -515,6 +557,7 @@ pub fn append_gitignore_entries(workdir: &Path, rel_paths: &[String]) -> AppResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{commit_file, setup};
     use std::fs;
     use tempfile::tempdir;
 
@@ -563,6 +606,35 @@ mod tests {
     }
 
     #[test]
+    fn gitignore_escapes_glob_metacharacters() {
+        let dir = tempdir().unwrap();
+        append_gitignore_entries(dir.path(), &["src/[weird]*?.txt".to_string()]).unwrap();
+
+        let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        assert_eq!(content, "/src/\\[weird\\]\\*\\?.txt\n");
+    }
+
+    #[test]
+    fn gitignore_escapes_leading_bang_and_hash_and_backslash() {
+        let dir = tempdir().unwrap();
+        append_gitignore_entries(dir.path(), &["!weird#\\name".to_string()]).unwrap();
+
+        let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        assert_eq!(content, "/\\!weird\\#\\\\name\n");
+    }
+
+    #[test]
+    fn gitignore_escapes_trailing_whitespace() {
+        let dir = tempdir().unwrap();
+        // Internal space stays literal; only the trailing space is escaped so
+        // gitignore does not strip it.
+        append_gitignore_entries(dir.path(), &["weird name ".to_string()]).unwrap();
+
+        let content = fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+        assert_eq!(content, "/weird name\\ \n");
+    }
+
+    #[test]
     fn gitignore_noop_when_all_present() {
         let dir = tempdir().unwrap();
         let gitignore = dir.path().join(".gitignore");
@@ -572,5 +644,118 @@ mod tests {
 
         let content = fs::read_to_string(&gitignore).unwrap();
         assert_eq!(content, "/a.txt\n/b.txt\n", "no duplicate lines appended");
+    }
+
+    // ---- basename (pure menu-label helper) ----
+
+    #[test]
+    fn basename_takes_last_component_and_falls_back() {
+        assert_eq!(basename("src/git/mod.rs"), "mod.rs");
+        assert_eq!(basename("top.txt"), "top.txt");
+    }
+
+    // ---- CtxAction::from_id ----
+
+    #[test]
+    fn from_id_maps_every_known_id_and_rejects_the_rest() {
+        assert_eq!(CtxAction::from_id("ctx:stage"), Some(CtxAction::Stage));
+        assert_eq!(CtxAction::from_id("ctx:unstage"), Some(CtxAction::Unstage));
+        assert_eq!(CtxAction::from_id("ctx:ignore"), Some(CtxAction::Ignore));
+        assert_eq!(CtxAction::from_id("ctx:discard"), Some(CtxAction::Discard));
+        assert_eq!(CtxAction::from_id("ctx:trash"), Some(CtxAction::Trash));
+        assert_eq!(CtxAction::from_id("ctx:open"), Some(CtxAction::Open));
+        assert_eq!(CtxAction::from_id("ctx:reveal"), Some(CtxAction::Reveal));
+        // Unknown suffix and an un-prefixed id both resolve to None.
+        assert_eq!(CtxAction::from_id("ctx:bogus"), None);
+        assert_eq!(CtxAction::from_id("stage"), None);
+    }
+
+    // ---- CtxAction::matches_panel (staged/unstaged gating) ----
+
+    #[test]
+    fn matches_panel_staged_allows_only_unstage_open_reveal() {
+        // The staged panel rejects the unstaged-only actions.
+        assert!(CtxAction::Unstage.matches_panel(true));
+        assert!(!CtxAction::Stage.matches_panel(true));
+        assert!(!CtxAction::Discard.matches_panel(true));
+        assert!(!CtxAction::Trash.matches_panel(true));
+        assert!(!CtxAction::Ignore.matches_panel(true));
+        // Open/Reveal are valid from either panel.
+        assert!(CtxAction::Open.matches_panel(true));
+        assert!(CtxAction::Reveal.matches_panel(true));
+    }
+
+    #[test]
+    fn matches_panel_unstaged_allows_everything_but_unstage() {
+        assert!(!CtxAction::Unstage.matches_panel(false));
+        assert!(CtxAction::Stage.matches_panel(false));
+        assert!(CtxAction::Discard.matches_panel(false));
+        assert!(CtxAction::Trash.matches_panel(false));
+        assert!(CtxAction::Ignore.matches_panel(false));
+        assert!(CtxAction::Open.matches_panel(false));
+        assert!(CtxAction::Reveal.matches_panel(false));
+    }
+
+    // ---- derive_selection against a real temp repo ----
+
+    #[test]
+    fn derive_selection_marks_tracked_modified_as_tracked() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "a.txt", "one\n");
+        // Working-tree modification of a tracked file → WT_MODIFIED, not WT_NEW.
+        fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+
+        let derived = derive_selection(&repo, &["a.txt".to_string()], false).unwrap();
+
+        assert_eq!(derived.paths, vec!["a.txt".to_string()]);
+        assert!(derived.any_tracked);
+        assert!(!derived.all_untracked);
+    }
+
+    #[test]
+    fn derive_selection_marks_untracked_only_set_as_all_untracked() {
+        let (dir, repo) = setup();
+        fs::write(dir.path().join("u.txt"), "new\n").unwrap();
+
+        let derived = derive_selection(&repo, &["u.txt".to_string()], false).unwrap();
+
+        assert_eq!(derived.paths, vec!["u.txt".to_string()]);
+        assert!(!derived.any_tracked);
+        assert!(derived.all_untracked);
+    }
+
+    #[test]
+    fn derive_selection_mixed_set_is_tracked_and_not_all_untracked() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "a.txt", "one\n");
+        fs::write(dir.path().join("a.txt"), "two\n").unwrap(); // tracked-modified
+        fs::write(dir.path().join("u.txt"), "new\n").unwrap(); // untracked
+
+        let derived =
+            derive_selection(&repo, &["a.txt".to_string(), "u.txt".to_string()], false).unwrap();
+
+        assert_eq!(derived.paths.len(), 2);
+        assert!(derived.any_tracked);
+        assert!(!derived.all_untracked);
+    }
+
+    #[test]
+    fn derive_selection_drops_paths_that_vanished_from_status() {
+        let (dir, repo) = setup();
+        commit_file(&repo, dir.path(), "a.txt", "one\n");
+        fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+
+        // "ghost.txt" is clean/absent, so it has no status entry and is dropped;
+        // only the surviving tracked-modified a.txt remains.
+        let derived = derive_selection(
+            &repo,
+            &["a.txt".to_string(), "ghost.txt".to_string()],
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(derived.paths, vec!["a.txt".to_string()]);
+        assert!(derived.any_tracked);
+        assert!(!derived.all_untracked);
     }
 }

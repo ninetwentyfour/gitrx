@@ -26,6 +26,7 @@ tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
 git2 = "0.19"
 notify = "6"
 base64 = "0.22"
@@ -34,4 +35,23 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process
 
 [dev-dependencies]
 tempfile = "3"
+
+# Aggressive, user-mandated clippy policy. Every `allow` below is justified.
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# This is an internal (non-published) crate: every fallible fn returns the crate's
+# uniform `AppResult`/`AppError` (or a Tauri `Result<_, String>`), so per-fn
+# `# Errors`/`# Panics` doc sections would be pure churn with no reader value.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Git domain vocabulary: `path`, `patch`, and `idx` are distinct, standard git
+# concepts that this lint flags as "too similar". Renaming them to satisfy the
+# lint would make the code less clear, not more.
+similar_names = "allow"
+# Nursery lint that is known to be unreliable (its lock-scope rewrites are noisy
+# and, on lock-guard-heavy paths like window teardown, actively misleading).
+significant_drop_tightening = "allow"
 

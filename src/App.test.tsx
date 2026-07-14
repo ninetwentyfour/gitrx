@@ -1,15 +1,20 @@
+/**
+ * App Tests
+ *
+ * The root component's two top-level states: the no-repo prompt versus the
+ * populated staging view driven by the store's `status`.
+ *
+ * Key behaviors:
+ * - getStatus rejection renders the "Open Repository" prompt, no file lists
+ * - a loaded status renders the Unstaged/Staged lists and the repo name
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import App from "./App";
 import { useAppStore } from "./store/useAppStore";
-import type { RepoStatus } from "./types/ipc";
+import { makeAppError, makeFileEntry, makeStatus } from "./test/factories";
 
-vi.mock("./api/git", () => ({
-  getStatus: vi.fn(),
-  getDiff: vi.fn(),
-  openRepo: vi.fn(),
-  pickRepoFolder: vi.fn(),
-}));
+vi.mock("./api/git", async () => (await import("./test/factories")).mockGitApi());
 
 vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({ listen: vi.fn().mockResolvedValue(() => {}) }),
@@ -28,32 +33,12 @@ import { getStatus } from "./api/git";
 
 const mockGetStatus = vi.mocked(getStatus);
 
-const sampleStatus: RepoStatus = {
+const sampleStatus = makeStatus({
   repoName: "rust-gitx",
   repoPath: "/repos/rust-gitx",
-  branch: "main",
-  headHasCommits: true,
-  unstaged: [
-    {
-      path: "src/app/main.rs",
-      status: "modified",
-      staged: false,
-      isBinary: false,
-      additions: 12,
-      deletions: 3,
-    },
-  ],
-  staged: [
-    {
-      path: "README.md",
-      status: "added",
-      staged: true,
-      isBinary: false,
-      additions: 5,
-      deletions: 0,
-    },
-  ],
-};
+  unstaged: [makeFileEntry({ path: "src/app/main.rs", additions: 12, deletions: 3 })],
+  staged: [makeFileEntry({ path: "README.md", status: "added", staged: true, additions: 5 })],
+});
 
 beforeEach(() => {
   useAppStore.setState({
@@ -70,7 +55,7 @@ afterEach(() => {
 
 describe("App", () => {
   it("renders the no-repo state when getStatus rejects", async () => {
-    mockGetStatus.mockRejectedValueOnce("No repository open");
+    mockGetStatus.mockRejectedValueOnce(makeAppError());
     render(<App />);
 
     expect(await screen.findByRole("button", { name: /open repository/i })).toBeInTheDocument();

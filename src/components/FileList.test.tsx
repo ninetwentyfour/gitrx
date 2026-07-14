@@ -1,55 +1,38 @@
+/**
+ * FileList Interaction Tests
+ *
+ * The staging-panel list wired to the live store: click/cmd/shift selection,
+ * double-click stage/unstage, the deferred-collapse timer dance, and the
+ * right-click native menu bridge.
+ *
+ * Key behaviors:
+ * - Plain/cmd/shift clicks build the expected multi-selection and clear the
+ *   other list on cross-list selection
+ * - A plain click on a multi-selection member DEFERS the collapse; a following
+ *   double-click / cmd-click cancels the pending collapse
+ * - Double-click stages/unstages the acted rows; right-click selects then opens
+ *   the native menu, toasting a normalized failure message
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FileList } from "./FileList";
 import { useAppStore } from "../store/useAppStore";
-import type { RepoStatus } from "../types/ipc";
+import { makeFileEntry, makeStatus as baseStatus } from "../test/factories";
 
-vi.mock("../api/git", () => ({
-  getStatus: vi.fn(),
-  getDiff: vi.fn().mockResolvedValue({
-    path: "x",
-    language: null,
-    isBinary: false,
-    isUntracked: false,
-    hunks: [],
-  }),
-  openRepo: vi.fn(),
-  pickRepoFolder: vi.fn(),
-  stageFile: vi.fn(),
-  unstageFile: vi.fn(),
-  discardFile: vi.fn(),
-  stageHunk: vi.fn(),
-  unstageHunk: vi.fn(),
-  discardHunk: vi.fn(),
-  commit: vi.fn(),
-  getHeadCommitMessage: vi.fn(),
-  showFileContextMenu: vi.fn().mockResolvedValue(undefined),
-  readImage: vi.fn(),
-}));
+vi.mock("../api/git", async () => (await import("../test/factories")).mockGitApi());
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: vi.fn() }));
 
-import { showFileContextMenu } from "../api/git";
+import { getDiff, showFileContextMenu } from "../api/git";
 
 const mockShowMenu = vi.mocked(showFileContextMenu);
 
-function makeStatus(): RepoStatus {
-  const f = (path: string, staged: boolean) => ({
-    path,
-    status: "modified" as const,
-    staged,
-    isBinary: false,
-    additions: 1,
-    deletions: 0,
-  });
-  return {
-    repoName: "repo",
-    repoPath: "/repos/repo",
-    branch: "main",
-    headHasCommits: true,
+function makeStatus() {
+  const f = (path: string, staged: boolean) => makeFileEntry({ path, staged });
+  return baseStatus({
     unstaged: [f("a.txt", false), f("b.txt", false), f("c.txt", false)],
     staged: [f("s1.txt", true)],
-  };
+  });
 }
 
 /** Render both file lists wired to the live store. */
@@ -66,17 +49,36 @@ function TwoLists() {
 
 const rowBtn = (name: RegExp) => screen.getByRole("button", { name });
 
+// The two store actions FileList tests replace in-place; snapshotted so the
+// afterEach can restore the real implementations and keep the mutation from
+// leaking file-wide (a per-file assignment to stageFiles/unstageFiles otherwise
+// persists across tests once set).
+const realStageFiles = useAppStore.getState().stageFiles;
+const realUnstageFiles = useAppStore.getState().unstageFiles;
+
 beforeEach(() => {
+  vi.mocked(getDiff).mockResolvedValue({
+    path: "x",
+    language: null,
+    isBinary: false,
+    isUntracked: false,
+    isLossy: false,
+    hunks: [],
+  });
+  vi.mocked(showFileContextMenu).mockResolvedValue(undefined);
   useAppStore.setState({
     status: makeStatus(),
     selection: null,
     currentDiff: null,
     busy: false,
+    toasts: [],
   });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  // Restore the real store actions in case a test swapped in a spy.
+  useAppStore.setState({ stageFiles: realStageFiles, unstageFiles: realUnstageFiles });
 });
 
 describe("FileList interactions", () => {
@@ -234,5 +236,18 @@ describe("FileList interactions", () => {
     fireEvent.contextMenu(rowBtn(/b\.txt/));
 
     expect(mockShowMenu).toHaveBeenCalledWith(["a.txt", "b.txt"], false);
+  });
+
+  it("a context-menu failure toasts the normalized message, not String(err)", async () => {
+    // An Error rejection must surface `err.message` (via the store's toMessage),
+    // not the `String(err)` form ("Error: ...").
+    mockShowMenu.mockRejectedValueOnce(new Error("menu boom"));
+    render(<TwoLists />);
+    fireEvent.contextMenu(rowBtn(/b\.txt/));
+
+    await waitFor(() =>
+      expect(useAppStore.getState().toasts.map((t) => t.message)).toContain("menu boom"),
+    );
+    expect(useAppStore.getState().toasts.map((t) => t.message)).not.toContain("Error: menu boom");
   });
 });

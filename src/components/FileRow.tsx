@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import type { FileEntry, FileStatus } from "../types/ipc";
 
-interface FileRowProps {
+type FileRowProps = {
   entry: FileEntry;
   selected: boolean;
   /** Row clicked; the handler reads modifier keys off the event. */
@@ -10,7 +10,7 @@ interface FileRowProps {
   onActivate: () => void;
   /** Row right-clicked → open the native context menu. */
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
-}
+};
 
 const STATUS_LABEL: Record<FileStatus, string> = {
   modified: "M",

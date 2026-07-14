@@ -1,12 +1,12 @@
 //! Create commits (and amend the tip) from the current index.
 //!
-//! GitX commits whatever is staged in the index: we write the index tree and
+//! `GitX` commits whatever is staged in the index: we write the index tree and
 //! attach it to HEAD (or amend HEAD in place). The commit author/committer is
 //! resolved from the repository's configuration, and a missing identity is
 //! turned into an actionable "set your git user.name/email" message rather than
 //! libgit2's terse "config value 'user.name' was not found".
 
-use git2::{Commit, DiffOptions, ErrorCode, Repository, Signature};
+use git2::{Commit, DiffOptions, ErrorClass, ErrorCode, Repository, Signature};
 
 use crate::error::{AppError, AppResult};
 
@@ -14,7 +14,7 @@ use crate::error::{AppError, AppResult};
 ///
 /// - Non-amend: writes the index tree and commits it on top of HEAD (or as the
 ///   root commit on an unborn HEAD). Rejected when nothing is staged, matching
-///   GitX ("No staged changes to commit").
+///   `GitX` ("No staged changes to commit").
 /// - Amend: rewrites the HEAD commit's message and swaps in the current index
 ///   tree, keeping the original parents. Allowed with an empty staged set so the
 ///   user can edit just the message. Errors clearly on an unborn HEAD.
@@ -22,10 +22,17 @@ use crate::error::{AppError, AppResult};
 /// An empty or whitespace-only `message` is always rejected.
 pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<String> {
     if message.trim().is_empty() {
-        return Err(AppError::msg("Commit message cannot be empty"));
+        return Err(AppError::empty_message());
     }
 
     // Snapshot the index into a tree object for either path.
+    //
+    // Known limitation: `write_tree` serializes the ENTIRE index, including any
+    // submodule (gitlink) entries. `build_status` and `has_staged_changes` hide
+    // submodule deltas from the UI, so a staged submodule bump is invisible — but
+    // if the user commits some other change, that hidden bump rides along in this
+    // tree. Excluding it would require rewriting the tree entry-by-entry, out of
+    // scope here; documented so the coupling is explicit.
     let mut index = repo.index()?;
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
@@ -34,16 +41,28 @@ pub fn commit(repo: &Repository, message: &str, amend: bool) -> AppResult<String
         let head_commit = match repo.head() {
             Ok(head) => head.peel_to_commit()?,
             Err(e) if e.code() == ErrorCode::UnbornBranch => {
-                return Err(AppError::msg(
+                return Err(AppError::validation(
                     "Nothing to amend: this branch has no commits yet",
                 ));
             }
             Err(e) => return Err(e.into()),
         };
-        head_commit.amend(Some("HEAD"), None, None, None, Some(message), Some(&tree))?
+        // Pass a fresh committer signature (with the current timestamp) rather
+        // than `None`, which would reuse the original commit's committer — so an
+        // amend is correctly recorded as a new committer action. The author
+        // (2nd arg) stays `None` to preserve the original authorship.
+        let committer = signature(repo)?;
+        head_commit.amend(
+            Some("HEAD"),
+            None,
+            Some(&committer),
+            None,
+            Some(message),
+            Some(&tree),
+        )?
     } else {
         if !has_staged_changes(repo)? {
-            return Err(AppError::msg("No staged changes to commit"));
+            return Err(AppError::nothing_staged());
         }
         let sig = signature(repo)?;
         let parent = match repo.head() {
@@ -74,12 +93,13 @@ pub fn head_commit_message(repo: &Repository) -> AppResult<String> {
 /// identity to an actionable message.
 fn signature(repo: &Repository) -> AppResult<Signature<'static>> {
     repo.signature().map_err(|e| {
-        if e.code() == ErrorCode::NotFound || e.message().contains("was not found") {
-            AppError::msg(
-                "Git identity is not configured. Set it with:\n  \
-                 git config --global user.name \"Your Name\"\n  \
-                 git config --global user.email \"you@example.com\"",
-            )
+        // A missing user.name/user.email surfaces from libgit2's
+        // `git_signature_default` as a NotFound code in the Config class. Inspect
+        // that structured error code/class rather than sniffing the message text
+        // (the old `contains("was not found")` heuristic) — the code is the
+        // contract, the English message is not.
+        if e.code() == ErrorCode::NotFound && e.class() == ErrorClass::Config {
+            AppError::identity_missing()
         } else {
             AppError::from(e)
         }
@@ -93,34 +113,27 @@ fn has_staged_changes(repo: &Repository) -> AppResult<bool> {
     let mut opts = DiffOptions::new();
     opts.include_typechange(true);
     let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
-    Ok(diff.deltas().len() > 0)
+    // M2: ignore submodule (gitlink) deltas so this stays consistent with
+    // `build_status`, which excludes submodules from the UI. A staged submodule
+    // bump alone must NOT enable the commit button when the user sees nothing
+    // stageable. `DiffOptions` has no submodule exclusion, so filter by mode.
+    Ok(diff.deltas().any(|d| !is_submodule_delta(&d)))
+}
+
+/// True when either side of `delta` is a submodule (gitlink) entry.
+fn is_submodule_delta(delta: &git2::DiffDelta) -> bool {
+    delta.new_file().mode() == git2::FileMode::Commit
+        || delta.old_file().mode() == git2::FileMode::Commit
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::setup;
     use git2::RepositoryInitOptions;
     use std::fs;
     use std::path::Path;
-    use tempfile::{tempdir, TempDir};
-
-    fn init_repo(dir: &Path) -> Repository {
-        let mut opts = RepositoryInitOptions::new();
-        opts.initial_head("main");
-        let repo = Repository::init_opts(dir, &opts).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "Test User").unwrap();
-            cfg.set_str("user.email", "test@example.com").unwrap();
-        }
-        repo
-    }
-
-    fn setup() -> (TempDir, Repository) {
-        let dir = tempdir().unwrap();
-        let repo = init_repo(dir.path());
-        (dir, repo)
-    }
+    use tempfile::tempdir;
 
     /// Stage `name` with `content` into the index.
     fn stage(repo: &Repository, dir: &Path, name: &str, content: &str) {
@@ -212,6 +225,7 @@ mod tests {
         stage(&repo, dir.path(), "a.txt", "a\n");
 
         let err = commit(&repo, "   \n\t", false).unwrap_err();
+        assert!(matches!(err, AppError::EmptyMessage { .. }), "{err:?}");
         assert!(err.to_string().to_lowercase().contains("empty"));
     }
 
@@ -223,6 +237,7 @@ mod tests {
 
         // Index now matches HEAD — nothing staged.
         let err = commit(&repo, "empty", false).unwrap_err();
+        assert!(matches!(err, AppError::NothingStaged { .. }), "{err:?}");
         assert!(err.to_string().contains("No staged changes"));
     }
 
@@ -252,21 +267,37 @@ mod tests {
         assert_eq!(head_commit_message(&repo).unwrap(), "");
     }
 
+    // Ignored by default: it asserts the "set your git identity" error, which only
+    // fires when `repo.signature()` finds NO identity. A repo-local config cannot
+    // hide a global `user.name`/`user.email`, and isolating git2 from the global
+    // config is a process-global, parallel-racy operation (`git2::opts::
+    // set_search_path`), so it must not run inside the shared suite. Rather than
+    // silently self-skip on any host that has a global identity (i.e. always, in
+    // practice), it is explicit: run it with git2's global config search path
+    // redirected to an empty dir. libgit2 discovers the global config via HOME/XDG
+    // (it does NOT honour git's own `GIT_CONFIG_GLOBAL`), so isolate those while
+    // preserving CARGO_HOME/RUSTUP_HOME:
+    //   EMPTY=$(mktemp -d); CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" \
+    //     HOME="$EMPTY" XDG_CONFIG_HOME="$EMPTY" GIT_CONFIG_NOSYSTEM=1 \
+    //     cargo test -p rust-gitx missing_identity_yields_actionable_message -- --ignored
     #[test]
+    #[ignore = "requires an env with no global git identity; see the comment above"]
     fn missing_identity_yields_actionable_message() {
         let dir = tempdir().unwrap();
         let mut opts = RepositoryInitOptions::new();
         opts.initial_head("main");
         let repo = Repository::init_opts(dir.path(), &opts).unwrap();
-        // Deliberately no user.name/email configured. Guard against a global
-        // identity leaking in from the test host by only asserting when the
-        // signature really is unavailable.
-        if repo.signature().is_ok() {
-            return;
-        }
+        // Precondition for the assertion: no identity is resolvable. If the host
+        // still exposes one (the env vars above were not set), fail loudly rather
+        // than pass vacuously — the whole point of --ignored is a real run.
+        assert!(
+            repo.signature().is_err(),
+            "run with GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 so no identity leaks in"
+        );
         stage(&repo, dir.path(), "a.txt", "a\n");
 
         let err = commit(&repo, "hello", false).unwrap_err();
+        assert!(matches!(err, AppError::IdentityMissing { .. }), "{err:?}");
         let msg = err.to_string();
         assert!(msg.contains("user.name"));
         assert!(msg.contains("user.email"));

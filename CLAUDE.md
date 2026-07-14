@@ -13,10 +13,10 @@ gitrx: a macOS git staging GUI (GitX replacement). Tauri 2.x — Rust backend (`
 
 ## Toolchain & commands
 
-- **bun only** — never npm/node. Frontend: `bun run typecheck` (tsc 7) / `lint` (oxlint) / `test` (vitest) / `build` (rolldown-vite) / `fmt` + `fmt:check` (oxfmt). No eslint/prettier.
+- **bun only** — never npm/node. Frontend: `bun run typecheck` (tsc 7, max-strict tsconfig) / `lint` (oxlint `--type-aware`, tsgolint backend — aggressive categories + type-checked rules) / `test` (vitest) / `build` (rolldown-vite) / `fmt` + `fmt:check` (oxfmt). No eslint/prettier.
 - Rust: `export PATH="$HOME/.cargo/bin:$PATH"` first (cargo not on default PATH); run `cargo build` / `cargo test` / `cargo fmt` from `src-tauri/`.
 - Release bundle: `bunx tauri build --bundles app` (NOT `bun run tauri build -- --bundles app` — the `--` forwards flags to cargo and breaks).
-- Full verification gate after any change: cargo build (zero warnings) + cargo test + bun typecheck/lint/test/build/fmt:check, all green. `/verify-all` runs it.
+- Full verification gate after any change: cargo build (zero warnings) + `cargo clippy --all-targets -- -D warnings` (zero warnings, now enforced by clippy — aggressive all/pedantic/nursery lints live in `src-tauri/Cargo.toml` `[lints]`) + cargo test + bun typecheck/lint/test/build/fmt:check, all green. `/verify-all` runs it.
 - Test fixture repo with every edge case: `scripts/make-fixture-repo.sh` (prints path).
 
 ## Invariants (violating these corrupts user data)

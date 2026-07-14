@@ -2,11 +2,11 @@ import { memo } from "react";
 import type { DiffLine } from "../types/ipc";
 import type { DiffLineTokens } from "../highlight/shiki";
 
-interface DiffLineRowProps {
+type DiffLineRowProps = {
   line: DiffLine;
   /** Syntax-highlight tokens for this line, or `null`/undefined for plain text. */
-  tokens?: DiffLineTokens;
-}
+  tokens?: DiffLineTokens | undefined;
+};
 
 const MARKER: Record<DiffLine["kind"], string> = {
   context: "",

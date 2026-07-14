@@ -35,9 +35,9 @@ export function useDiffHighlight(diff: FileDiff | null): DiffTokens | null {
   useEffect(() => {
     const update = () => setTheme(currentTheme());
     const mql =
-      typeof window !== "undefined"
-        ? window.matchMedia?.("(prefers-color-scheme: dark)")
-        : undefined;
+      typeof window === "undefined"
+        ? undefined
+        : window.matchMedia?.("(prefers-color-scheme: dark)");
     mql?.addEventListener("change", update);
 
     let observer: MutationObserver | undefined;

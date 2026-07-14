@@ -1,18 +1,24 @@
+/**
+ * DiffViewer Tests
+ *
+ * The right-hand diff pane: toolbar subtitle, hunk rendering, lossy/binary
+ * fallbacks, inline image previews, and the virtualization threshold.
+ *
+ * Key behaviors:
+ * - Renders hunk header, gutter numbers, +/- markers, and enabled hunk actions
+ * - Lossy (non-UTF-8) diffs disable hunk actions with an explanatory title
+ * - Binary files show a placeholder; image binaries fetch an inline preview that
+ *   re-fetches on diff-identity change and falls back to the placeholder on error
+ * - Diffs over the line threshold switch to the virtual list
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { DiffViewer } from "./DiffViewer";
 import { useAppStore } from "../store/useAppStore";
+import { makeDiff, makeDiffLine, makeHunk } from "../test/factories";
 import type { FileDiff } from "../types/ipc";
 
-vi.mock("../api/git", () => ({
-  getStatus: vi.fn(),
-  getDiff: vi.fn(),
-  openRepo: vi.fn(),
-  pickRepoFolder: vi.fn(),
-  stageFile: vi.fn(),
-  unstageFile: vi.fn(),
-  readImage: vi.fn(),
-}));
+vi.mock("../api/git", async () => (await import("../test/factories")).mockGitApi());
 
 // Highlighting is async and pulls in shiki's wasm; stub it so these DOM-shape
 // tests stay synchronous and deterministic (plain-text render path).
@@ -29,46 +35,30 @@ function selFor(path: string, staged = false) {
   return { staged, paths: [path], anchorPath: path, focusedPath: path };
 }
 
-const textDiff: FileDiff = {
+const textDiff = makeDiff({
   path: "src/main.rs",
   language: "rust",
-  isBinary: false,
-  isUntracked: false,
   hunks: [
-    {
+    makeHunk({
       header: "@@ -1,3 +1,4 @@ fn main()",
-      oldStart: 1,
       oldLines: 3,
-      newStart: 1,
       newLines: 4,
       lines: [
-        { kind: "context", oldLineNo: 1, newLineNo: 1, content: "fn main() {" },
-        { kind: "del", oldLineNo: 2, newLineNo: null, content: "    old();" },
-        { kind: "add", oldLineNo: null, newLineNo: 2, content: "    new();" },
-        { kind: "add", oldLineNo: null, newLineNo: 3, content: "    more();" },
-        { kind: "context", oldLineNo: 3, newLineNo: 4, content: "}" },
+        makeDiffLine({ kind: "context", oldLineNo: 1, newLineNo: 1, content: "fn main() {" }),
+        makeDiffLine({ kind: "del", oldLineNo: 2, newLineNo: null, content: "    old();" }),
+        makeDiffLine({ kind: "add", oldLineNo: null, newLineNo: 2, content: "    new();" }),
+        makeDiffLine({ kind: "add", oldLineNo: null, newLineNo: 3, content: "    more();" }),
+        makeDiffLine({ kind: "context", oldLineNo: 3, newLineNo: 4, content: "}" }),
       ],
-    },
+    }),
   ],
-};
+});
 
 // A non-image binary keeps the plain placeholder path.
-const binaryDiff: FileDiff = {
-  path: "app.bin",
-  language: null,
-  isBinary: true,
-  isUntracked: false,
-  hunks: [],
-};
+const binaryDiff = makeDiff({ path: "app.bin", isBinary: true });
 
 // An image binary triggers the inline preview fetch.
-const imageDiff: FileDiff = {
-  path: "logo.png",
-  language: null,
-  isBinary: true,
-  isUntracked: false,
-  hunks: [],
-};
+const imageDiff = makeDiff({ path: "logo.png", isBinary: true });
 
 beforeEach(() => {
   useAppStore.setState({
@@ -123,6 +113,37 @@ describe("DiffViewer", () => {
     // Enabled Stage / Discard buttons for an unstaged hunk.
     expect(screen.getByRole("button", { name: "Stage" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+  });
+
+  it("disables the hunk Stage/Discard buttons with the lossy title for a non-UTF-8 diff", () => {
+    useAppStore.setState({
+      selection: selFor("src/main.rs"),
+      currentDiff: { ...textDiff, isLossy: true },
+    });
+    render(<DiffViewer />);
+
+    const stage = screen.getByRole("button", { name: "Stage" });
+    const discard = screen.getByRole("button", { name: "Discard" });
+    expect(stage).toBeDisabled();
+    expect(discard).toBeDisabled();
+    const lossyTitle = "File contains non-UTF-8 text — use whole-file staging";
+    expect(stage).toHaveAttribute("title", lossyTitle);
+    expect(discard).toHaveAttribute("title", lossyTitle);
+  });
+
+  it("disables the Unstage hunk button with the lossy title for a lossy staged diff", () => {
+    useAppStore.setState({
+      selection: selFor("src/main.rs", true),
+      currentDiff: { ...textDiff, isLossy: true },
+    });
+    render(<DiffViewer />);
+
+    const unstage = screen.getByRole("button", { name: "Unstage" });
+    expect(unstage).toBeDisabled();
+    expect(unstage).toHaveAttribute(
+      "title",
+      "File contains non-UTF-8 text — use whole-file staging",
+    );
   });
 
   it("renders an Unstage button for staged selections", () => {
@@ -186,6 +207,23 @@ describe("DiffViewer", () => {
     expect(container.querySelector(".diff-viewer__image")).toBeInTheDocument();
   });
 
+  it("re-fetches the image preview when the diff object changes for the same path", async () => {
+    // A file edited on disk yields a NEW currentDiff object with the SAME path and
+    // staged flag; the preview effect keys on diff identity so it re-fetches
+    // instead of showing the stale image.
+    mockReadImage.mockResolvedValue({ mimeType: "image/png", base64: "AAAA" });
+    useAppStore.setState({ selection: selFor("logo.png"), currentDiff: imageDiff });
+    render(<DiffViewer />);
+
+    await screen.findByRole("img");
+    expect(mockReadImage).toHaveBeenCalledTimes(1);
+
+    // Same path + staged, but a fresh diff object (content changed on disk).
+    useAppStore.setState({ currentDiff: { ...imageDiff } });
+
+    await waitFor(() => expect(mockReadImage).toHaveBeenCalledTimes(2));
+  });
+
   it("fetches the index version for a staged image", async () => {
     mockReadImage.mockResolvedValueOnce({ mimeType: "image/gif", base64: "ZZZZ" });
     useAppStore.setState({
@@ -232,27 +270,20 @@ describe("DiffViewer", () => {
   });
 
   it("virtualizes diffs whose total line count exceeds the threshold", () => {
-    const bigDiff: FileDiff = {
+    const bigDiff: FileDiff = makeDiff({
       path: "src/big.rs",
       language: "rust",
-      isBinary: false,
-      isUntracked: false,
       hunks: [
-        {
+        makeHunk({
           header: "@@ -1,2001 +1,2001 @@",
-          oldStart: 1,
           oldLines: 2001,
-          newStart: 1,
           newLines: 2001,
-          lines: Array.from({ length: 2001 }, (_, i) => ({
-            kind: "context" as const,
-            oldLineNo: i + 1,
-            newLineNo: i + 1,
-            content: `line ${i}`,
-          })),
-        },
+          lines: Array.from({ length: 2001 }, (_, i) =>
+            makeDiffLine({ oldLineNo: i + 1, newLineNo: i + 1, content: `line ${i}` }),
+          ),
+        }),
       ],
-    };
+    });
     useAppStore.setState({
       selection: selFor("src/big.rs"),
       currentDiff: bigDiff,

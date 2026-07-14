@@ -94,7 +94,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])
 }
 
-/// Register the "Window" submenu as the macOS windows menu so AppKit auto-populates
+/// Register the "Window" submenu as the macOS windows menu so `AppKit` auto-populates
 /// it with the open repo windows (plus the standard "Bring All to Front" grouping).
 ///
 /// **Ordering is load-bearing.** muda documents that
@@ -102,7 +102,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// submenu to `Menu` **and after calling `Menu::init_for_nsapp`** on that menu".
 /// Tauri runs `init_for_nsapp` from inside `set_menu`/the builder's `.menu(...)`
 /// hook. The previous code called `set_as_windows_menu_for_nsapp` during menu
-/// *construction* — before the menu was ever installed — so AppKit never adopted
+/// *construction* — before the menu was ever installed — so `AppKit` never adopted
 /// it and the submenu stayed inert, showing only our static items. Installing the
 /// menu via the builder's `.menu(...)` (which calls `init_for_nsapp` synchronously
 /// during `build()`) and then calling this from `setup` (which runs on the
@@ -134,7 +134,7 @@ pub fn set_windows_menu<R: Runtime>(app: &AppHandle<R>) {
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     if id == INSTALL_CLI_ID {
         let app = app.clone();
-        std::thread::spawn(move || cli_install::install_cli(app));
+        std::thread::spawn(move || cli_install::install_cli(&app));
         return;
     }
     crate::context_menu::handle_menu_event(app, id);

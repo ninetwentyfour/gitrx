@@ -1,6 +1,6 @@
 //! Filesystem watching + debounced auto-refresh.
 //!
-//! We watch the repository working tree recursively via `notify` (FSEvents on
+//! We watch the repository working tree recursively via `notify` (`FSEvents` on
 //! macOS). Raw filesystem events are noisy — a single `git status`/`git add`
 //! touches the index, a `.lock` file, loose objects, reflogs, and more — so we
 //! run every event path through [`classify_paths`] to keep only the changes that
@@ -48,25 +48,25 @@ pub enum Reason {
 
 impl Reason {
     /// The camelCase-free wire string sent to the frontend payload.
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
-            Reason::Index => "index",
-            Reason::Head => "head",
-            Reason::Fs => "fs",
+            Self::Index => "index",
+            Self::Head => "head",
+            Self::Fs => "fs",
         }
     }
 
     /// Priority rank; higher wins when a burst mixes categories.
-    fn rank(self) -> u8 {
+    const fn rank(self) -> u8 {
         match self {
-            Reason::Index => 2,
-            Reason::Head => 1,
-            Reason::Fs => 0,
+            Self::Index => 2,
+            Self::Head => 1,
+            Self::Fs => 0,
         }
     }
 
     /// Return whichever of `self`/`other` has the higher priority.
-    fn max(self, other: Reason) -> Reason {
+    const fn max(self, other: Self) -> Self {
         if self.rank() >= other.rank() {
             self
         } else {
@@ -92,23 +92,24 @@ fn classify_one(git_dir: &Path, path: &Path) -> Option<Reason> {
         return None;
     }
 
-    match path.strip_prefix(git_dir) {
+    path.strip_prefix(git_dir).map_or(
+        // Outside `.git`: a working-tree change is always relevant (gitignored
+        // churn is harmless — the refresh it triggers is cheap and debounced).
+        Some(Reason::Fs),
         // Inside `.git`: keep only a curated allow-list, drop everything else.
-        Ok(rel) => {
+        |rel| {
             if rel == Path::new("index") {
                 Some(Reason::Index)
-            } else if rel == Path::new("HEAD") || rel == Path::new("MERGE_HEAD") {
-                Some(Reason::Head)
-            } else if rel.starts_with("refs") {
+            } else if rel == Path::new("HEAD")
+                || rel == Path::new("MERGE_HEAD")
+                || rel.starts_with("refs")
+            {
                 Some(Reason::Head)
             } else {
                 None
             }
-        }
-        // Outside `.git`: a working-tree change is always relevant (gitignored
-        // churn is harmless — the refresh it triggers is cheap and debounced).
-        Err(_) => Some(Reason::Fs),
-    }
+        },
+    )
 }
 
 /// Pure classification of a batch of event paths into an optional [`Reason`].
@@ -119,10 +120,7 @@ pub fn classify_paths(git_dir: &Path, paths: &[PathBuf]) -> Option<Reason> {
     let mut best: Option<Reason> = None;
     for path in paths {
         if let Some(reason) = classify_one(git_dir, path) {
-            best = Some(match best {
-                Some(cur) => cur.max(reason),
-                None => reason,
-            });
+            best = Some(best.map_or(reason, |cur| cur.max(reason)));
             // `Index` is the ceiling; no later path can outrank it.
             if best == Some(Reason::Index) {
                 break;
@@ -142,7 +140,7 @@ pub fn classify_paths(git_dir: &Path, paths: &[PathBuf]) -> Option<Reason> {
 /// `is_ignored` returns `true`.
 ///
 /// This is the testable seam — the watcher tests drive it with a closure built
-/// from a real repo's `.gitignore`, no FSEvents required. [`classify_paths`]
+/// from a real repo's `.gitignore`, no `FSEvents` required. [`classify_paths`]
 /// itself stays pure.
 fn classify_paths_filtered(
     git_dir: &Path,
@@ -188,9 +186,10 @@ pub fn build_watcher(
     // Derive the `.git` directory for classification. `repo.path()` is the git
     // dir (handles worktrees/`.git` files); fall back to the obvious location if
     // discovery fails so we still watch, just with a best-guess filter.
-    let git_dir = open_repository(repo_workdir)
-        .map(|repo| repo.path().to_path_buf())
-        .unwrap_or_else(|_| repo_workdir.join(".git"));
+    let git_dir = open_repository(repo_workdir).map_or_else(
+        |_| repo_workdir.join(".git"),
+        |repo| repo.path().to_path_buf(),
+    );
 
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
 
@@ -204,7 +203,7 @@ pub fn build_watcher(
     let app = app.clone();
     let label = label.to_string();
     let repo_workdir = repo_workdir.to_path_buf();
-    std::thread::spawn(move || debounce_loop(&app, &label, &git_dir, &repo_workdir, rx));
+    std::thread::spawn(move || debounce_loop(&app, &label, &git_dir, &repo_workdir, &rx));
 
     Ok(watcher)
 }
@@ -217,22 +216,21 @@ fn debounce_loop(
     label: &str,
     git_dir: &Path,
     repo_workdir: &Path,
-    rx: mpsc::Receiver<notify::Result<Event>>,
+    rx: &mpsc::Receiver<notify::Result<Event>>,
 ) {
     loop {
         // Wait (indefinitely) for the first event of the next burst.
-        let first = match rx.recv() {
-            Ok(ev) => ev,
-            Err(_) => return, // watcher dropped — we're done
+        let Ok(first) = rx.recv() else {
+            return; // watcher dropped — we're done
         };
 
         // Open the repo once per burst to answer ignore queries (cheap; matches
         // the codebase's reopen-per-call convention). If the open fails we fall
         // back to "nothing ignored" so a real change is never dropped.
         let repo = open_repository(repo_workdir).ok();
-        let is_ignored = |path: &Path| match &repo {
-            Some(repo) => path_is_ignored(repo, path),
-            None => false,
+        let is_ignored = |path: &Path| {
+            repo.as_ref()
+                .is_some_and(|repo| path_is_ignored(repo, path))
         };
 
         let mut pending: Option<Reason> = None;
@@ -267,10 +265,7 @@ fn accumulate(
     match ev {
         Ok(event) => {
             if let Some(reason) = classify_paths_filtered(git_dir, is_ignored, &event.paths) {
-                *pending = Some(match *pending {
-                    Some(cur) => cur.max(reason),
-                    None => reason,
-                });
+                *pending = Some(pending.map_or(reason, |cur| cur.max(reason)));
             }
         }
         Err(e) => {

@@ -6,11 +6,11 @@ import { tokyowhale } from "./tokyowhale";
 export type DiffTheme = "tokyowhale" | "one-light";
 
 /** A single highlighted span: text plus its resolved colour and optional style. */
-export interface HlToken {
+export type HlToken = {
   content: string;
   color: string;
   fontStyle?: "italic" | "bold";
-}
+};
 
 /** Tokens for one diff line, or `null` when the line has no highlighting. */
 export type DiffLineTokens = HlToken[] | null;
@@ -35,16 +35,14 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 const loadedLangs = new Set<string>();
 
 function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import("shiki").then((shiki) =>
-      shiki.createHighlighter({
-        themes: [tokyowhale, "one-light"],
-        // Start with no languages; each is dynamically imported on first sight
-        // so the initial bundle stays small (grammars are separate chunks).
-        langs: [],
-      }),
-    );
-  }
+  highlighterPromise ??= import("shiki").then((shiki) =>
+    shiki.createHighlighter({
+      themes: [tokyowhale, "one-light"],
+      // Start with no languages; each is dynamically imported on first sight
+      // so the initial bundle stays small (grammars are separate chunks).
+      langs: [],
+    }),
+  );
   return highlighterPromise;
 }
 
@@ -77,19 +75,19 @@ function stripCr(content: string): string {
 }
 
 /** Where a diff line's content lives in the reconstructed blobs. */
-interface LineRef {
+type LineRef = {
   /** 0-based index into the OLD blob's lines, or -1 if not on the old side. */
   old: number;
   /** 0-based index into the NEW blob's lines, or -1 if not on the new side. */
   new: number;
-}
+};
 
-interface Reconstructed {
+type Reconstructed = {
   oldText: string;
   newText: string;
   /** refs[hunkIdx][lineIdx] → blob positions (or -1/-1 for noNewline markers). */
   refs: LineRef[][];
-}
+};
 
 /**
  * Rebuild OLD (context + deletions) and NEW (context + additions) text blobs
@@ -105,6 +103,15 @@ export function reconstructBlobs(diff: FileDiff): Reconstructed {
   const newLines: string[] = [];
   const refs: LineRef[][] = [];
 
+  // Accepted trade-off: hunks are concatenated back-to-back into single OLD/NEW
+  // blobs with no gap for the (elided) unchanged lines between them. The grammar
+  // tokenizer therefore carries state ACROSS hunk boundaries — e.g. an unterminated
+  // block comment or template literal opened in one hunk bleeds into the next. In
+  // real diffs the elided context between hunks almost always closes such
+  // constructs, so cross-hunk bleed is rare and the multi-line highlighting win
+  // (strings/comments/JSX spanning many lines WITHIN a hunk) far outweighs it. The
+  // alternative — tokenizing each hunk in isolation — truncates those constructs
+  // on every hunk, which looks worse far more often.
   for (const hunk of diff.hunks) {
     const hunkRefs: LineRef[] = [];
     for (const line of hunk.lines) {

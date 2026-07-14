@@ -1,9 +1,127 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript"],
+  "plugins": ["react", "typescript", "unicorn", "oxc", "promise"],
   "env": {
     "browser": true,
     "es2024": true
   },
-  "ignorePatterns": ["dist", "src-tauri/target", "node_modules"]
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error",
+    "pedantic": "error",
+    "style": "warn"
+  },
+  "rules": {
+    // --- Cherry-picked restriction rules (category itself stays off) ---
+    // Stray `debugger` must never reach a commit/build.
+    "no-debugger": "error",
+    // Dynamic code execution is never legitimate in this app; ban it outright.
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    // Blocking browser dialogs (alert/confirm/prompt) are wrong here — the app
+    // uses the Tauri dialog plugin's async `confirm`, never `window.confirm`.
+    "no-alert": "error",
+
+    // --- eqeqeq: keep it, but allow the deliberate `== null` nullish idiom ---
+    // The store checks `x == null` / `x != null` on purpose to catch BOTH null
+    // and undefined (values are `T | null | undefined` under
+    // noUncheckedIndexedAccess). `null: "ignore"` keeps `===` enforced
+    // everywhere else while permitting these documented nullish guards.
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+
+    // --- Deliberate off (false positive for the stack) ---
+    // React 19 automatic JSX runtime (tsconfig `jsx: react-jsx`); the project
+    // intentionally does not import React just to satisfy the classic runtime.
+    "react/react-in-jsx-scope": "off",
+
+    // --- Deliberate off (conflicts with a documented codebase convention) ---
+    // This codebase documents heavily with same-line inline comments; the rule
+    // fights that intentional style (and this very config relies on it).
+    "no-inline-comments": "off",
+    // Diff lines and hunks render from an immutable, append-only, never-reordered
+    // list, so the array index IS the correct stable React key here.
+    "react/no-array-index-key": "off",
+    // The app manipulates the load-bearing `data-theme` attribute directly (see
+    // applyThemeToDom): a MutationObserver watches `attributeFilter: ["data-theme"]`
+    // and the system-reset path needs `removeAttribute`, which has no lossless
+    // `dataset` equivalent. The attribute API is clearer and contract-exact here.
+    "unicorn/prefer-dom-node-dataset": "off",
+    // The store stages/unstages files with sequential `await`s ON PURPOSE (the
+    // backend serialises index writes; sequencing preserves ordered error
+    // capture). Parallelising would change behaviour.
+    "no-await-in-loop": "off",
+    // Terminal side-effect `.then()` handlers set React state and intentionally
+    // return nothing; a synthetic return only adds noise.
+    "promise/always-return": "off",
+
+    // --- Deliberate off (pure size metrics; no correctness signal) ---
+    // The zustand store factory closure and the larger React components are
+    // cohesive by design; splitting them to satisfy a line-count metric would
+    // harm readability, not help it.
+    "max-lines-per-function": "off",
+    "max-lines": "off",
+
+    // --- Type-aware rules kept ON (the valuable core) ---
+    // no-floating-promises, no-misused-promises, await-thenable,
+    // no-for-in-array, no-unnecessary-type-assertion, no-unnecessary-condition,
+    // restrict-plus-operands, restrict-template-expressions, unbound-method,
+    // require-await, etc. all stay at error via the categories above. The store's
+    // deliberate fire-and-forget promises already satisfy no-floating-promises
+    // (every one uses `void`/`.catch`), so nothing is silenced there.
+
+    // --- Type-aware rules deliberately OFF (typescript-eslint's own
+    //     non-recommended / "onerous" strict tier; each would force massive
+    //     churn or behaviour-risk for ~zero bug-catching value here) ---
+    // Would require `readonly` on essentially every parameter (incl. React
+    // props and store args). typescript-eslint documents it as impractical and
+    // excludes it from every recommended preset.
+    "typescript/prefer-readonly-parameter-types": "off",
+    // The codebase deliberately treats empty-string and null identically as
+    // "absent" (`if (errorMsg)`, `if (renamedFrom)`); explicit nullish+empty
+    // guards everywhere would be pure verbosity with no behaviour change.
+    "typescript/strict-boolean-expressions": "off",
+    // Flags idiomatic inline handlers like `onClick={() => store.action()}`;
+    // forcing a block body on every arrow handler is noise.
+    "typescript/no-confusing-void-expression": "off",
+    // False-positive on React `useEffect` callbacks, which legitimately return
+    // either a cleanup function or nothing depending on the branch.
+    "typescript/consistent-return": "off",
+    // The few `as` casts are deliberate boundary narrowings at third-party
+    // (shiki's over-narrow bundled-literal unions) and DOM/test-mock edges;
+    // they are safe and intentional, not accidental widening.
+    "typescript/no-unsafe-type-assertion": "off"
+  },
+  "overrides": [
+    {
+      // Test files exercise DOM/mocks in ways these rules mis-flag: explicit
+      // `undefined` args/assertions are meaningful in tests, Testing Library
+      // matchers use plain (non-`/u`) regexes, and local per-test helper closures
+      // are fine. None of these are production-safety signals.
+      "files": ["**/*.test.ts", "**/*.test.tsx", "src/test/**"],
+      "rules": {
+        "unicorn/no-useless-undefined": "off",
+        "require-unicode-regexp": "off",
+        "unicorn/consistent-function-scoping": "off",
+        // jsdom stubs (setup.ts) cast partial mocks to their DOM interfaces; the
+        // type engine flags these as redundant, but they document intent and are
+        // test-only. No production code triggers this rule.
+        "typescript/no-unnecessary-type-assertion": "off"
+      }
+    },
+    {
+      // vite.config.ts reads an untyped Node global (`process.env.TAURI_DEV_HOST`,
+      // guarded by an existing @ts-expect-error) and uses `||` on it to treat an
+      // empty value as "no host". These type-aware rules fire only because that
+      // build-tool global is `any`; the app source is fully covered.
+      "files": ["vite.config.ts"],
+      "rules": {
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/prefer-nullish-coalescing": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist", "src-tauri/target", "node_modules", "scripts"]
 }

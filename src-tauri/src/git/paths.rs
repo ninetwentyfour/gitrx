@@ -25,10 +25,10 @@ use crate::error::{AppError, AppResult};
 /// malformed path is rejected without touching the filesystem.
 pub fn validate_repo_relative_path(_workdir: &Path, path: &str) -> AppResult<()> {
     if path.is_empty() {
-        return Err(AppError::msg("Path must not be empty"));
+        return Err(AppError::validation("Path must not be empty"));
     }
     if path.contains('\n') || path.contains('\0') {
-        return Err(AppError::msg(
+        return Err(AppError::validation(
             "Path must not contain newline or NUL characters",
         ));
     }
@@ -37,12 +37,14 @@ pub fn validate_repo_relative_path(_workdir: &Path, path: &str) -> AppResult<()>
     for component in p.components() {
         match component {
             Component::ParentDir => {
-                return Err(AppError::msg(format!(
+                return Err(AppError::validation(format!(
                     "Path must not contain a '..' component: {path}"
                 )));
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(AppError::msg(format!("Path must be relative: {path}")));
+                return Err(AppError::validation(format!(
+                    "Path must be relative: {path}"
+                )));
             }
             _ => {}
         }
@@ -51,7 +53,9 @@ pub fn validate_repo_relative_path(_workdir: &Path, path: &str) -> AppResult<()>
     // Belt-and-suspenders: catch any platform-specific absolute form the
     // component scan above might not have flagged.
     if p.is_absolute() {
-        return Err(AppError::msg(format!("Path must be relative: {path}")));
+        return Err(AppError::validation(format!(
+            "Path must be relative: {path}"
+        )));
     }
 
     Ok(())

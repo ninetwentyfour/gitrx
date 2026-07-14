@@ -1,13 +1,27 @@
+/**
+ * Shiki Diff Highlighting Tests
+ *
+ * The diff-to-highlight bridge: `reconstructBlobs` (rebuild old/new text + per-line
+ * attribution from a hunk list, stripping CRLF), the size guards that bail to
+ * plain text, and a real-shiki smoke test proving the custom TokyoWhale theme
+ * registers (keyword mauve + string green resolve).
+ *
+ * Key behaviors:
+ * - reconstructBlobs splits context/del/add across old/new blobs and strips `\r`
+ * - highlightDiff returns null over the line/char/unknown-language guards
+ * - real shiki resolves the registered theme's keyword + string colours
+ */
 import { describe, expect, it } from "vitest";
 import { highlightDiff, reconstructBlobs } from "./shiki";
+import { makeDiff, makeHunk } from "../test/factories";
 import type { DiffLine, FileDiff, Hunk } from "../types/ipc";
 
 function hunk(header: string, lines: DiffLine[]): Hunk {
-  return { header, oldStart: 1, oldLines: 0, newStart: 1, newLines: 0, lines };
+  return makeHunk({ header, oldLines: 0, newLines: 0, lines });
 }
 
 function diff(hunks: Hunk[], language: string | null = "typescript"): FileDiff {
-  return { path: "f.ts", language, isBinary: false, isUntracked: false, hunks };
+  return makeDiff({ path: "f.ts", language, hunks });
 }
 
 describe("reconstructBlobs", () => {
@@ -37,14 +51,14 @@ describe("reconstructBlobs", () => {
     expect(newText).toBe("a\nB\nc\nd");
 
     // Hunk 1 attribution.
-    expect(refs[0][0]).toEqual({ old: 0, new: 0 }); // context
-    expect(refs[0][1]).toEqual({ old: 1, new: -1 }); // del -> old only
-    expect(refs[0][2]).toEqual({ old: -1, new: 1 }); // add -> new only
+    expect(refs[0]?.[0]).toEqual({ old: 0, new: 0 }); // context
+    expect(refs[0]?.[1]).toEqual({ old: 1, new: -1 }); // del -> old only
+    expect(refs[0]?.[2]).toEqual({ old: -1, new: 1 }); // add -> new only
 
     // Hunk 2 attribution: the CRLF context line lands at old[2]/new[2].
-    expect(refs[1][0]).toEqual({ old: 2, new: 2 });
-    expect(refs[1][1]).toEqual({ old: -1, new: 3 }); // add "d"
-    expect(refs[1][2]).toEqual({ old: -1, new: -1 }); // noNewline marker: no blob line
+    expect(refs[1]?.[0]).toEqual({ old: 2, new: 2 });
+    expect(refs[1]?.[1]).toEqual({ old: -1, new: 3 }); // add "d"
+    expect(refs[1]?.[2]).toEqual({ old: -1, new: -1 }); // noNewline marker: no blob line
   });
 });
 

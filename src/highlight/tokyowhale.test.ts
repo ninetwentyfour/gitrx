@@ -1,3 +1,17 @@
+/**
+ * TokyoWhale Theme Tests
+ *
+ * Pins the one theme rule the real-shiki smoke test in `shiki.test.ts` does NOT
+ * observe: comments must render italic. The identity fields and the keyword/string
+ * colour literals were pruned — `shiki.test.ts` exercises those colours through a
+ * real highlight, which supersedes asserting the raw theme table.
+ *
+ * Key behaviors:
+ * - The `comment` scope is slate #708090 AND italic (fontStyle contract)
+ *
+ * See also:
+ * - `shiki.test.ts` for real-shiki colour coverage (keyword mauve, string green)
+ */
 import { describe, expect, it } from "vitest";
 import { tokyowhale } from "./tokyowhale";
 import type { RawThemeSetting } from "shiki";
@@ -12,23 +26,6 @@ function findByScope(scope: string): RawThemeSetting | undefined {
 }
 
 describe("tokyowhale theme", () => {
-  it("declares the expected identity and editor colors", () => {
-    expect(tokyowhale.name).toBe("tokyowhale");
-    expect(tokyowhale.type).toBe("dark");
-    expect(tokyowhale.colors?.["editor.background"]).toBe("#0a0a0d");
-    expect(tokyowhale.colors?.["editor.foreground"]).toBe("#a9b1d6");
-  });
-
-  it("maps keyword scopes to the mauve #C792EA", () => {
-    const rule = findByScope("keyword");
-    expect(rule?.settings.foreground).toBe("#C792EA");
-  });
-
-  it("maps string to the green #9ce88d", () => {
-    const rule = findByScope("string");
-    expect(rule?.settings.foreground).toBe("#9ce88d");
-  });
-
   it("renders comments in italic slate #708090", () => {
     const rule = findByScope("comment");
     expect(rule?.settings.foreground).toBe("#708090");
