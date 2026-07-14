@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel in-progress runs for the same ref when a new commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    # macOS: the app targets macOS and the unix-gated symlink/mode tests must run here.
+    runs-on: macos-latest
+    # Deny warnings at compile time so `cargo build`/`cargo test` fail on any warning,
+    # mirroring the local verify-all gate.
+    env:
+      RUSTFLAGS: "-D warnings"
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build
+        run: cargo build
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Format check
+        run: cargo fmt --check
+
+  frontend:
+    # Ubuntu is cheaper and sufficient: oxlint-tsgolint ships a linux-x64 binary
+    # (optionalDependency @oxlint-tsgolint/linux-x64), so `bun run lint` works here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun run test
+
+      - name: Build
+        run: bun run build
+
+      - name: Format check
+        run: bun run fmt:check

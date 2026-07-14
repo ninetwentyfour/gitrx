@@ -2,6 +2,14 @@
 
 A lightweight, GitX-style git client for macOS built with [Tauri 2.x](https://tauri.app/), React, and TypeScript. It shows a repository's working-tree status and lets you stage, unstage, discard, and commit changes at the file or hunk level, with a live-updating view backed by a filesystem watcher.
 
+## CI
+
+[![CI](https://github.com/ninetwentyfour/gitrx/actions/workflows/ci.yml/badge.svg)](https://github.com/ninetwentyfour/gitrx/actions/workflows/ci.yml)
+
+Every push to `master` and every pull request runs the full verification gate (Rust build/clippy/test/fmt on macOS, frontend typecheck/lint/test/build/fmt on Ubuntu).
+
+Releases are tag-triggered: `git tag v0.2.0 && git push --tags` builds the macOS bundles (and an experimental Windows canary) and publishes them to a **draft** GitHub release.
+
 ## Development
 
 Requires [Bun](https://bun.sh/) and a Rust toolchain.

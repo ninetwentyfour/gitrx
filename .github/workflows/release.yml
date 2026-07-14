@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      # Required so tauri-action can create the draft release and upload bundles.
+      # The default GITHUB_TOKEN is sufficient for same-repo releases — no extra secret needed.
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            # Bundles: .app + .dmg. Builds are UNSIGNED (no signing certs configured),
+            # so Gatekeeper will quarantine them: users right-click the .app and choose
+            # Open on first launch. Signing/notarization can be added later via secrets.
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: "--target x86_64-pc-windows-msvc"
+
+    runs-on: ${{ matrix.platform }}
+    # Windows is a CANARY: compatibility work is NOT done (macOS-specific menu APIs,
+    # CLI installer, path handling under audit). This job reports what breaks without
+    # failing the release. Any Windows installer it produces is expressly experimental.
+    continue-on-error: ${{ matrix.platform == 'windows-latest' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          # Default token — sufficient for creating a release in this same repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "gitrx v__VERSION__"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
