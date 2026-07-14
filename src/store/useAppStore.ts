@@ -170,7 +170,7 @@ function reconcileSelection(
   }
   const anchorPath =
     selection.anchorPath && present.has(selection.anchorPath) ? selection.anchorPath : null;
-  let focusedPath = selection.focusedPath;
+  let { focusedPath } = selection;
   let focusCleared = false;
   if (focusedPath != null && !present.has(focusedPath)) {
     focusedPath = null;
@@ -233,8 +233,8 @@ async function loadPersistedTheme(): Promise<Theme | null> {
     const store = await load(SETTINGS_STORE);
     const value = await store.get(THEME_KEY);
     return isTheme(value) ? value : null;
-  } catch (err) {
-    console.warn("Failed to load persisted theme:", err);
+  } catch (error) {
+    console.warn("Failed to load persisted theme:", error);
     return null;
   }
 }
@@ -245,8 +245,8 @@ async function persistTheme(theme: Theme): Promise<void> {
     const store = await load(SETTINGS_STORE);
     await store.set(THEME_KEY, theme);
     await store.save();
-  } catch (err) {
-    console.warn("Failed to persist theme:", err);
+  } catch (error) {
+    console.warn("Failed to persist theme:", error);
   }
 }
 
@@ -282,7 +282,7 @@ export const useAppStore = create<AppState>((set, get) => {
   // Monotonic toast id source.
   let toastSeq = 0;
   // Teardown callbacks for the active watcher subscriptions.
-  let watcherUnlisteners: Array<() => void> = [];
+  let watcherUnlisteners: (() => void)[] = [];
   // The in-progress initWatcher() call, so a re-entrant call reuses it rather
   // than stacking a second subscription (React StrictMode double-invoke).
   let initWatcherPromise: Promise<void> | null = null;
@@ -375,8 +375,8 @@ export const useAppStore = create<AppState>((set, get) => {
     for (const path of paths) {
       try {
         await mutate(path);
-      } catch (err) {
-        errorMsg ??= toMessage(err);
+      } catch (error) {
+        errorMsg ??= toMessage(error);
       }
     }
 
@@ -438,8 +438,8 @@ export const useAppStore = create<AppState>((set, get) => {
     let errorMsg: string | null = null;
     try {
       await mutate(payload);
-    } catch (err) {
-      errorMsg = toMessage(err);
+    } catch (error) {
+      errorMsg = toMessage(error);
     }
 
     // Resync unconditionally (success updates the remaining hunks; failure
@@ -486,14 +486,14 @@ export const useAppStore = create<AppState>((set, get) => {
         if (seq !== statusSeq) return; // a newer status write superseded this one
         set({ status });
         applyWindowTitle(status);
-      } catch (err) {
+      } catch (error) {
         if (seq !== statusSeq) return;
         // Always fall to the no-repo screen. A `noRepoOpen` rejection is the
         // expected empty state (plain launch, nothing to restore) and stays silent;
         // any OTHER failure ALSO shows no-repo but surfaces a toast so it is not lost.
         set({ status: null });
         applyWindowTitle(null);
-        if (!isNoRepoError(err)) get().pushToast(toMessage(err));
+        if (!isNoRepoError(error)) get().pushToast(toMessage(error));
       }
     },
 
@@ -538,8 +538,8 @@ export const useAppStore = create<AppState>((set, get) => {
       let path: string | null;
       try {
         path = await pickRepoFolder();
-      } catch (err) {
-        get().pushToast(toMessage(err));
+      } catch (error) {
+        get().pushToast(toMessage(error));
         return;
       }
       if (path === null) return; // user cancelled
@@ -560,10 +560,10 @@ export const useAppStore = create<AppState>((set, get) => {
           loading: false,
         });
         applyWindowTitle(status);
-      } catch (err) {
+      } catch (error) {
         if (seq !== statusSeq) return;
         set({ loading: false });
-        get().pushToast(toMessage(err));
+        get().pushToast(toMessage(error));
       }
     },
 
@@ -593,13 +593,13 @@ export const useAppStore = create<AppState>((set, get) => {
         // Branch changes arrive via watcher-driven refreshStatus, so the title
         // tracks the current branch naturally.
         applyWindowTitle(status);
-      } catch (err) {
+      } catch (error) {
         if (seq !== statusSeq) return; // stale failure — the newer request owns loading
         set({ loading: false });
         if (opts?.silent) {
-          console.warn("Background status refresh failed:", err);
+          console.warn("Background status refresh failed:", error);
         } else {
-          get().pushToast(toMessage(err));
+          get().pushToast(toMessage(error));
         }
       }
     },
@@ -724,13 +724,13 @@ export const useAppStore = create<AppState>((set, get) => {
         const diff = await getDiff(focusedPath, selection.staged, contextLines);
         if (seq !== diffSeq) return; // a newer request superseded this one
         set({ currentDiff: diff, diffLoading: false });
-      } catch (err) {
+      } catch (error) {
         if (seq !== diffSeq) return; // stale failure — ignore
         set({ diffLoading: false });
         if (opts?.silent) {
-          console.warn("Background diff refresh failed:", err);
+          console.warn("Background diff refresh failed:", error);
         } else {
-          get().pushToast(toMessage(err));
+          get().pushToast(toMessage(error));
         }
       }
     },
@@ -769,9 +769,9 @@ export const useAppStore = create<AppState>((set, get) => {
       let confirmed: boolean;
       try {
         confirmed = await confirm(message);
-      } catch (err) {
+      } catch (error) {
         set({ busy: false });
-        get().pushToast(toMessage(err));
+        get().pushToast(toMessage(error));
         return;
       }
       if (!confirmed) {
@@ -783,8 +783,8 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         await apiDiscardFile(path);
         await get().refreshStatus({ silent: true });
-      } catch (err) {
-        errorMsg = toMessage(err);
+      } catch (error) {
+        errorMsg = toMessage(error);
       } finally {
         set({ busy: false });
       }
@@ -835,9 +835,9 @@ export const useAppStore = create<AppState>((set, get) => {
         confirmed = await confirm(
           `Discard this hunk of ${currentDiff.path}? This cannot be undone.`,
         );
-      } catch (err) {
+      } catch (error) {
         set({ busy: false });
-        get().pushToast(toMessage(err));
+        get().pushToast(toMessage(error));
         return;
       }
       if (!confirmed) {
@@ -881,8 +881,8 @@ export const useAppStore = create<AppState>((set, get) => {
         // ...or typed into the box during the fetch — never clobber those keystrokes.
         if (get().commitMessage !== captured) return;
         set({ commitMessage: headMessage, lastPrefill: headMessage });
-      } catch (err) {
-        get().pushToast(toMessage(err));
+      } catch (error) {
+        get().pushToast(toMessage(error));
       }
     },
 
@@ -896,8 +896,8 @@ export const useAppStore = create<AppState>((set, get) => {
         await apiCommit(commitMessage, amend);
         set({ commitMessage: "", amend: false, commitDraft: "", lastPrefill: null });
         await get().refreshStatus({ silent: true });
-      } catch (err) {
-        errorMsg = toMessage(err);
+      } catch (error) {
+        errorMsg = toMessage(error);
       } finally {
         set({ commitBusy: false });
       }

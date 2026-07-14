@@ -62,7 +62,7 @@ describe("HunkView", () => {
     const unstageHunk = vi.fn();
     useAppStore.setState({ unstageHunk });
 
-    render(<HunkView hunk={hunk} staged={true} />);
+    render(<HunkView hunk={hunk} staged />);
 
     const unstage = screen.getByRole("button", { name: "Unstage" });
     expect(unstage).toBeEnabled();

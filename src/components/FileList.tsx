@@ -1,5 +1,4 @@
-import { Fragment, useEffect } from "react";
-import type { MouseEvent } from "react";
+import { Fragment, useEffect, type MouseEvent } from "react";
 import type { FileEntry } from "../types/ipc";
 import { toMessage, useAppStore } from "../store/useAppStore";
 import { showFileContextMenu } from "../api/git";
@@ -67,7 +66,7 @@ export function FileList({ title, files, staged }: FileListProps) {
       selectFile(path, staged);
       paths = [path];
     }
-    showFileContextMenu(paths, staged).catch((err) => pushToast(toMessage(err)));
+    showFileContextMenu(paths, staged).catch((error) => pushToast(toMessage(error)));
   };
 
   return (

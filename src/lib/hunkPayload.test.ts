@@ -69,7 +69,7 @@ describe("toHunkPayload", () => {
     expect(untracked.isUntracked).toBe(true);
   });
 
-  it("preserves a trailing \\r in content (CRLF byte-exactness)", () => {
+  it(String.raw`preserves a trailing \r in content (CRLF byte-exactness)`, () => {
     const hunk = makeHunk({
       lines: [
         makeDiffLine({ kind: "context", oldLineNo: 1, newLineNo: 1, content: "a\r" }),

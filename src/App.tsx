@@ -54,7 +54,7 @@ function RepoView() {
             </Panel>
             <Separator className="resize-handle resize-handle--vertical" />
             <Panel defaultSize={33} minSize={15} className="staging__pane">
-              <FileList title="Staged Changes" files={status.staged} staged={true} />
+              <FileList title="Staged Changes" files={status.staged} staged />
             </Panel>
           </Group>
         </Panel>

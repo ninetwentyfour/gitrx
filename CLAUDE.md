@@ -13,7 +13,8 @@ gitrx: a macOS git staging GUI (GitX replacement). Tauri 2.x — Rust backend (`
 
 ## Toolchain & commands
 
-- **bun only** — never npm/node. Frontend: `bun run typecheck` (tsc 7, max-strict tsconfig) / `lint` (oxlint `--type-aware`, tsgolint backend — aggressive categories + type-checked rules) / `test` (vitest) / `build` (rolldown-vite) / `fmt` + `fmt:check` (oxfmt). No eslint/prettier.
+- **bun only** — never npm/node. Frontend: `bun run typecheck` (tsc 7, max-strict tsconfig) / `lint` (oxlint `--type-aware --max-warnings 0`, tsgolint backend — aggressive categories + type-checked rules) / `test` (vitest) / `build` (rolldown-vite) / `fmt` + `fmt:check` (oxfmt). No eslint/prettier.
+- **Zero-warnings policy (frontend lint):** every oxlint tier including `style` is at `"error"`, never `"warn"`, and `--max-warnings 0` means ANY warning-level finding fails the run (no `--quiet` masking). New rules are either fixed in code or given an individually justified per-rule `"off"` in `.oxlintrc.json` — never a blanket category `"off"`.
 - Rust: `export PATH="$HOME/.cargo/bin:$PATH"` first (cargo not on default PATH); run `cargo build` / `cargo test` / `cargo fmt` from `src-tauri/`.
 - Release bundle: `bunx tauri build --bundles app` (NOT `bun run tauri build -- --bundles app` — the `--` forwards flags to cargo and breaks).
 - Full verification gate after any change: cargo build (zero warnings) + `cargo clippy --all-targets -- -D warnings` (zero warnings, now enforced by clippy — aggressive all/pedantic/nursery lints live in `src-tauri/Cargo.toml` `[lints]`) + cargo test + bun typecheck/lint/test/build/fmt:check, all green. `/verify-all` runs it.

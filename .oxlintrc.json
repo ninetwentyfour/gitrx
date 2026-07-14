@@ -10,7 +10,11 @@
     "suspicious": "error",
     "perf": "error",
     "pedantic": "error",
-    "style": "warn"
+    // Zero-warnings policy: the style tier is "error" (never "warn"), so every
+    // finding either gets fixed in code or an individually justified per-rule
+    // "off" below. `bun run lint` also passes `--max-warnings 0`, so any future
+    // warning-level finding fails the run.
+    "style": "error"
   },
   "rules": {
     // --- Cherry-picked restriction rules (category itself stays off) ---
@@ -91,7 +95,109 @@
     // The few `as` casts are deliberate boundary narrowings at third-party
     // (shiki's over-narrow bundled-literal unions) and DOM/test-mock edges;
     // they are safe and intentional, not accidental widening.
-    "typescript/no-unsafe-type-assertion": "off"
+    "typescript/no-unsafe-type-assertion": "off",
+
+    // ============================================================================
+    // Style tier promoted to "error" (zero-warnings policy triage)
+    // ============================================================================
+    // The whole `style` category is now "error". The entries below are the
+    // per-rule triage of everything it surfaced. Each "off" fights an established
+    // house convention and carries its own justification — there is NO blanket
+    // category "off" anywhere. Rules not listed here stay at "error".
+
+    // --- Configured to match house convention (rule stays ON) ---
+    // House convention (typescript skill) is `type`, never `interface`; the rule
+    // defaults to the opposite direction. There are zero `interface`
+    // declarations, so this simply locks the convention in as enforced.
+    "typescript/consistent-type-definitions": ["error", "type"],
+    // Require braces when the body is on its own line, but allow the codebase's
+    // deliberate, pervasive terse single-line guards (`if (x) return null;`).
+    // The default "all" would add noise-only braces to every early-return guard.
+    "curly": ["error", "multi-line"],
+
+    // --- Deliberate off: mechanical ordering that destroys semantic grouping ---
+    // Object keys are grouped semantically (domain fields, then flags, then
+    // collections; store-slice and test-fixture groupings mirror their types),
+    // not alphabetically. Alphabetizing scrambles meaning. oxfmt does not reorder
+    // keys, so nothing else fights this.
+    "sort-keys": "off",
+    // Imports are grouped by origin/kind (external deps, then `import type`, then
+    // local modules; dependency order such as react → react-dom → local), not
+    // alphabetically. oxfmt intentionally leaves import order untouched, so this
+    // rule would be the SOLE enforcer of an alphabetical order that destroys that
+    // grouping — same rationale as sort-keys.
+    "sort-imports": "off",
+
+    // --- Deliberate off: fights the documented comment style ---
+    // The codebase documents heavily with lowercase same-line/continuation
+    // comments (see `no-inline-comments: off` above, and this very file). Forcing
+    // a leading capital is pure noise and can corrupt code-in-comments, URLs, and
+    // directive comments.
+    "capitalized-comments": "off",
+
+    // --- Deliberate off: `null` is part of the IPC contract ---
+    // `null` is the wire shape of the Rust/serde IPC types (`DiffLine.oldLineNo:
+    // number | null`, `RepoStatus`, `FileDiff.language`, …) and the store's
+    // documented `== null` nullish idiom. Rewriting to `undefined` would diverge
+    // from the backend contract and change round-trip serialization semantics.
+    "unicorn/no-null": "off",
+
+    // --- Deliberate off: PascalCase components, camelCase modules ---
+    // Files are PascalCase for React components (`FileRow.tsx`) and camelCase for
+    // modules/hooks (`useAppStore.ts`, `hunkPayload.ts`). unicorn defaults to
+    // kebab-case; enforcing it would rename every file and fight React/TS norms.
+    "unicorn/filename-case": "off",
+
+    // --- Deliberate off: pure size/shape metrics (no correctness signal) ---
+    // Consistent with the already-off max-lines / max-lines-per-function: these
+    // count statements, params, and JSX depth, and would force splitting cohesive
+    // functions and flattening readable JSX to satisfy an arbitrary threshold.
+    "max-statements": "off",
+    "max-params": "off",
+    "react/jsx-max-depth": "off",
+
+    // --- Deliberate off: UI/layout/test magic numbers ---
+    // Layout sizes, virtualization thresholds, timeouts, and test fixtures use
+    // inline numeric literals that read more clearly in place than hoisted to
+    // named constants. No correctness signal.
+    "no-magic-numbers": "off",
+    // Short identifiers (`f`, `r`, `e`, `hl`, `mql`) are idiomatic in callbacks,
+    // reducers, and tests; a 2-char minimum fights that for no readability gain.
+    "id-length": "off",
+
+    // --- Deliberate off: fights the intentional function-declaration mix ---
+    // The codebase deliberately uses named `function` declarations for React
+    // components and top-level helpers, and arrow consts for handlers and small
+    // factories. `func-style` enforces exactly ONE form and cannot express that
+    // split, so it fights the convention (typescript skill: named components).
+    "func-style": "off",
+    // Ternaries are the idiomatic conditional-render form in JSX and for small
+    // value selections here; an outright ban forces verbose if/else with no gain.
+    "no-ternary": "off",
+
+    // --- Deliberate off: declare-then-assign is intentional ---
+    // `let x;` then assignment inside a `try`, branch, or `switch` (and the
+    // deferred-promise capture in the testkit) is deliberate; initializing at the
+    // declaration would need `= undefined` (which unicorn/no-useless-undefined
+    // then flags) or a semantic restructure.
+    "init-declarations": "off",
+
+    // --- Deliberate off: `window` guards detect the non-DOM environment ---
+    // `typeof window === "undefined"` guards genuinely detect the test/non-DOM
+    // environment before touching `matchMedia`/`addEventListener`. `globalThis`
+    // is ALWAYS defined, so the rule's rewrite would neuter those guards — a
+    // behavior change, not a cosmetic one.
+    "unicorn/prefer-global-this": "off",
+
+    // --- Deliberate off: fire-and-forget `.then` and deferred promises ---
+    // The store/highlight layers use terminal `.then()` / `.then(ok, err)`
+    // handlers on purpose (they set React state and return nothing — see
+    // `promise/always-return: off` above), and the testkit builds a controllable
+    // promise via `new Promise`. These three rules fight those deliberate
+    // patterns; the valuable `no-floating-promises` (type-aware) still applies.
+    "promise/prefer-await-to-then": "off",
+    "promise/prefer-await-to-callbacks": "off",
+    "promise/avoid-new": "off"
   },
   "overrides": [
     {
@@ -107,7 +213,15 @@
         // jsdom stubs (setup.ts) cast partial mocks to their DOM interfaces; the
         // type engine flags these as redundant, but they document intent and are
         // test-only. No production code triggers this rule.
-        "typescript/no-unnecessary-type-assertion": "off"
+        "typescript/no-unnecessary-type-assertion": "off",
+        // `vi.mock(...)` factories are hoisted above all imports, so they cannot
+        // reference a top-level const; the `(await import("../test/factories"))
+        // .mockGitApi()` inline member access on the await IS the required idiom.
+        "unicorn/no-await-expression-member": "off",
+        // Test render helpers spread a prepared `handlers`/props bag onto the
+        // component under test — a standard testing-library ergonomic, not a
+        // production prop-drilling smell.
+        "react/jsx-props-no-spreading": "off"
       }
     },
     {

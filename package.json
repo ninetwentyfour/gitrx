@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware --fix --max-warnings 0",
+    "lint:check": "oxlint --type-aware --max-warnings 0",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"
   },

@@ -37,10 +37,16 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process
 tempfile = "3"
 
 # Aggressive, user-mandated clippy policy. Every `allow` below is justified.
+# Zero-warnings doctrine: severities are `deny` AT THE SOURCE so a bare
+# `cargo build`/`cargo clippy` fails on any finding — the gate's `-D warnings`
+# flag is redundant belt-and-suspenders, not the only enforcement.
+[lints.rust]
+warnings = { level = "deny", priority = -1 }
+
 [lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
 
 # This is an internal (non-published) crate: every fallible fn returns the crate's
 # uniform `AppResult`/`AppError` (or a Tauri `Result<_, String>`), so per-fn

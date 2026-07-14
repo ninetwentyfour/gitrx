@@ -126,5 +126,5 @@ describe("highlightDiff (real shiki, proves theme registration)", () => {
     // which only happens if the custom theme registration was accepted by shiki.
     expect(colors).toContain("#C792EA");
     expect(colors).toContain("#9CE88D");
-  }, 20000);
+  }, 20_000);
 });

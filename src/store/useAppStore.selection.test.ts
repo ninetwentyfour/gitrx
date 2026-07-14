@@ -399,8 +399,8 @@ describe("discardFile", () => {
     // call must short-circuit on the busy guard instead of prompting again.
     let resolveConfirm!: (v: boolean) => void;
     mockConfirm.mockReturnValueOnce(
-      new Promise<boolean>((r) => {
-        resolveConfirm = r;
+      new Promise<boolean>((_resolve) => {
+        resolveConfirm = _resolve;
       }),
     );
 
@@ -551,8 +551,8 @@ describe("hunk staging", () => {
     // must short-circuit on the busy guard rather than opening a second dialog.
     let resolveConfirm!: (v: boolean) => void;
     mockConfirm.mockReturnValueOnce(
-      new Promise<boolean>((r) => {
-        resolveConfirm = r;
+      new Promise<boolean>((_resolve) => {
+        resolveConfirm = _resolve;
       }),
     );
 

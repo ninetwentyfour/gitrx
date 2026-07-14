@@ -42,7 +42,7 @@ function TwoLists() {
   return (
     <>
       <FileList title="Unstaged" files={status.unstaged} staged={false} />
-      <FileList title="Staged" files={status.staged} staged={true} />
+      <FileList title="Staged" files={status.staged} staged />
     </>
   );
 }
@@ -299,7 +299,7 @@ describe("FileList untracked group divider", () => {
       <FileList
         title="Staged"
         files={[makeFileEntry({ path: "s.txt", staged: true, status: "modified" })]}
-        staged={true}
+        staged
       />,
     );
     expect(container.querySelector(".file-list__divider")).toBeNull();

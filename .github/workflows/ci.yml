@@ -61,7 +61,9 @@ jobs:
         run: bun run typecheck
 
       - name: Lint
-        run: bun run lint
+        # check-only on CI: the default `lint` auto-fixes, which would silently
+        # repair the runner's checkout and let dirty commits pass.
+        run: bun run lint:check
 
       - name: Test
         run: bun run test

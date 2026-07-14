@@ -39,17 +39,18 @@ if (!globalThis.matchMedia) {
 // jsdom does not implement layout, so element sizes are 0. Stub the boxes the
 // panel library reads during resize calculations.
 if (!Element.prototype.getBoundingClientRect.name.includes("stub")) {
-  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function stub() {
-    return {
-      width: 800,
-      height: 600,
-      top: 0,
-      left: 0,
-      right: 800,
-      bottom: 600,
-      x: 0,
-      y: 0,
-      toJSON: () => {},
-    } as DOMRect;
-  });
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    () =>
+      ({
+        width: 800,
+        height: 600,
+        top: 0,
+        left: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as DOMRect,
+  );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { readImage } from "../api/git";
 import type { FileDiff } from "../types/ipc";
@@ -126,7 +126,7 @@ const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "
 function extensionOf(path: string): string {
   const dot = path.lastIndexOf(".");
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return dot > slash && dot >= 0 ? path.slice(dot + 1).toLowerCase() : "";
+  return dot > slash && dot !== -1 ? path.slice(dot + 1).toLowerCase() : "";
 }
 
 type ImageState = { status: "loading" } | { status: "loaded"; src: string } | { status: "error" };
@@ -170,6 +170,26 @@ function BinaryNotice({ path, staged }: { path: string; staged: boolean }) {
 
   const showPreview = isImage && image.status !== "error";
 
+  // Flattened out of a nested JSX ternary (readability; behaviour unchanged):
+  // no preview → binary/oversized notice; preview + loading → spinner text;
+  // otherwise the fetched image.
+  let preview: ReactNode;
+  if (!showPreview) {
+    preview = (
+      <p className="diff-viewer__notice">
+        Binary or oversized file — showing no text diff. Use whole-file stage/unstage.
+      </p>
+    );
+  } else if (image.status === "loading") {
+    preview = <p className="diff-viewer__notice">Loading preview…</p>;
+  } else {
+    preview = (
+      <div className="diff-viewer__image">
+        <img className="diff-viewer__image-el" src={image.src} alt={path} />
+      </div>
+    );
+  }
+
   return (
     <div className="diff-viewer__binary">
       <div className="diff-viewer__binary-actions">
@@ -193,19 +213,7 @@ function BinaryNotice({ path, staged }: { path: string; staged: boolean }) {
           </button>
         )}
       </div>
-      {showPreview ? (
-        image.status === "loading" ? (
-          <p className="diff-viewer__notice">Loading preview…</p>
-        ) : (
-          <div className="diff-viewer__image">
-            <img className="diff-viewer__image-el" src={image.src} alt={path} />
-          </div>
-        )
-      ) : (
-        <p className="diff-viewer__notice">
-          Binary or oversized file — showing no text diff. Use whole-file stage/unstage.
-        </p>
-      )}
+      {preview}
     </div>
   );
 }
