@@ -1,3 +1,6 @@
+// POSIX-only: installs a shell script to Homebrew paths via osascript admin
+// escalation, using unix file-mode APIs. Excluded on Windows/Linux.
+#[cfg(target_os = "macos")]
 mod cli_install;
 mod commands;
 mod context_menu;

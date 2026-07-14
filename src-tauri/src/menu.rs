@@ -5,12 +5,19 @@
 //! structure ourselves — otherwise Cut/Copy/Paste/Undo and the Window commands
 //! disappear, breaking text editing in the commit-message box.
 
-use tauri::menu::{AboutMetadataBuilder, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadataBuilder, Menu, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Runtime};
 
+// The CLI installer (and the menu item that triggers it) is macOS-only; see
+// `crate::cli_install`. Windows/Linux menus omit the item entirely.
+#[cfg(target_os = "macos")]
+use tauri::menu::MenuItem;
+
+#[cfg(target_os = "macos")]
 use crate::cli_install;
 
-/// Stable id for the custom "Install Command Line Tool…" item.
+/// Stable id for the custom "Install Command Line Tool…" item (macOS only).
+#[cfg(target_os = "macos")]
 pub const INSTALL_CLI_ID: &str = "install-cli";
 
 /// Stable id for the "Window" submenu, so we can look it up again after the menu
@@ -29,30 +36,63 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build();
 
     // --- App menu ------------------------------------------------------------
-    let install_cli = MenuItem::with_id(
-        app,
-        INSTALL_CLI_ID,
-        "Install Command Line Tool…",
-        true,
-        None::<&str>,
-    )?;
+    // Shared items are bound first so the two platform variants of the submenu
+    // differ only by the macOS-only "Install Command Line Tool…" entry.
+    let about = PredefinedMenuItem::about(app, None, Some(about_metadata))?;
+    let sep_a = PredefinedMenuItem::separator(app)?;
+    let services = PredefinedMenuItem::services(app, None)?;
+    let sep_b = PredefinedMenuItem::separator(app)?;
+    let hide = PredefinedMenuItem::hide(app, None)?;
+    let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+    let show_all = PredefinedMenuItem::show_all(app, None)?;
+    let sep_c = PredefinedMenuItem::separator(app)?;
+    let quit = PredefinedMenuItem::quit(app, None)?;
 
+    #[cfg(target_os = "macos")]
+    let app_menu = {
+        let install_cli = MenuItem::with_id(
+            app,
+            INSTALL_CLI_ID,
+            "Install Command Line Tool…",
+            true,
+            None::<&str>,
+        )?;
+        let sep_cli = PredefinedMenuItem::separator(app)?;
+        Submenu::with_items(
+            app,
+            &app_name,
+            true,
+            &[
+                &about,
+                &sep_a,
+                &install_cli,
+                &sep_cli,
+                &services,
+                &sep_b,
+                &hide,
+                &hide_others,
+                &show_all,
+                &sep_c,
+                &quit,
+            ],
+        )?
+    };
+
+    #[cfg(not(target_os = "macos"))]
     let app_menu = Submenu::with_items(
         app,
         &app_name,
         true,
         &[
-            &PredefinedMenuItem::about(app, None, Some(about_metadata))?,
-            &PredefinedMenuItem::separator(app)?,
-            &install_cli,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::services(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
-            &PredefinedMenuItem::show_all(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
+            &about,
+            &sep_a,
+            &services,
+            &sep_b,
+            &hide,
+            &hide_others,
+            &show_all,
+            &sep_c,
+            &quit,
         ],
     )?;
 
@@ -132,6 +172,7 @@ pub fn set_windows_menu<R: Runtime>(app: &AppHandle<R>) {
 /// [`crate::context_menu`]; they share this single `on_menu_event` sink with the
 /// static application menu without colliding.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    #[cfg(target_os = "macos")]
     if id == INSTALL_CLI_ID {
         let app = app.clone();
         std::thread::spawn(move || cli_install::install_cli(&app));
