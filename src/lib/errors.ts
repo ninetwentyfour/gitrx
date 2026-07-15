@@ -23,6 +23,7 @@ const APP_ERROR_NAMES: ReadonlySet<AppErrorName> = new Set([
   "nothingStaged",
   "emptyMessage",
   "windowClosed",
+  "unreadableWorkTreeFile",
   "validation",
   "git",
   "io",

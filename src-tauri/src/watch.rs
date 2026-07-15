@@ -27,10 +27,20 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::git::open_repository;
+use crate::logging::T_WATCH;
 
 /// Trailing-edge quiet period: once no new event has arrived for this long, the
 /// accumulated burst is flushed as one `repo-changed` event.
 const DEBOUNCE: Duration = Duration::from_millis(200);
+
+/// A burst whose raw filesystem-event count meets this is logged as a storm —
+/// the signature of a runaway (a rebuild, a huge checkout, an editor thrash).
+const STORM_THRESHOLD: usize = 1000;
+/// A burst that keeps more than this many relevant paths is logged at `info`
+/// (a meaningful change); quieter bursts stay at `debug`.
+const KEPT_INFO_THRESHOLD: usize = 100;
+/// How many raw paths to capture as a storm sample (for the warn line).
+const SAMPLE_LIMIT: usize = 5;
 
 /// Why a `repo-changed` event fired, in strict priority order `Index > Head > Fs`.
 ///
@@ -149,10 +159,40 @@ fn classify_paths_filtered(
 ) -> Option<Reason> {
     let kept: Vec<PathBuf> = paths
         .iter()
-        .filter(|p| p.starts_with(git_dir) || !is_ignored(p))
+        .filter(|p| is_kept(git_dir, is_ignored, p))
         .cloned()
         .collect();
     classify_paths(git_dir, &kept)
+}
+
+/// Whether a raw event path survives the ignore filter: every `.git`-internal
+/// path is kept (its curated handling lives in [`classify_paths`]); a workdir
+/// path is kept only when git does not ignore it. Shared by
+/// [`classify_paths_filtered`] and the burst-stats counter so the "kept" count
+/// logged can never drift from what actually drives a refresh.
+fn is_kept(git_dir: &Path, is_ignored: &impl Fn(&Path) -> bool, path: &Path) -> bool {
+    path.starts_with(git_dir) || !is_ignored(path)
+}
+
+/// Per-burst diagnostics accumulated across a debounced window, logged when the
+/// burst flushes. `raw_events` is every filesystem path seen (the storm metric);
+/// `kept` is how many survived the ignore filter (the refresh-relevance metric).
+#[derive(Debug, Default)]
+struct BurstStats {
+    raw_events: usize,
+    kept: usize,
+    samples: Vec<PathBuf>,
+}
+
+impl BurstStats {
+    /// Fold one raw event path into the tally, capturing up to [`SAMPLE_LIMIT`]
+    /// example paths for the storm warn line.
+    fn record_raw(&mut self, path: &Path) {
+        self.raw_events += 1;
+        if self.samples.len() < SAMPLE_LIMIT {
+            self.samples.push(path.to_path_buf());
+        }
+    }
 }
 
 /// True when `path` (an absolute event path) is ignored by git's ignore rules.
@@ -199,6 +239,7 @@ pub fn build_watcher(
         let _ = tx.send(res);
     })?;
     watcher.watch(repo_workdir, RecursiveMode::Recursive)?;
+    log::info!(target: T_WATCH, "watcher built: label={label} workdir={}", repo_workdir.display());
 
     let app = app.clone();
     let label = label.to_string();
@@ -221,6 +262,7 @@ fn debounce_loop(
     loop {
         // Wait (indefinitely) for the first event of the next burst.
         let Ok(first) = rx.recv() else {
+            log::info!(target: T_WATCH, "watcher stopped (dropped): label={label}");
             return; // watcher dropped — we're done
         };
 
@@ -234,21 +276,39 @@ fn debounce_loop(
         };
 
         let mut pending: Option<Reason> = None;
-        accumulate(app, label, git_dir, &is_ignored, first, &mut pending);
+        let mut stats = BurstStats::default();
+        accumulate(
+            app,
+            label,
+            git_dir,
+            &is_ignored,
+            first,
+            &mut pending,
+            &mut stats,
+        );
 
         // Coalesce follow-on events until the quiet window elapses.
         loop {
             match rx.recv_timeout(DEBOUNCE) {
-                Ok(ev) => accumulate(app, label, git_dir, &is_ignored, ev, &mut pending),
+                Ok(ev) => accumulate(
+                    app,
+                    label,
+                    git_dir,
+                    &is_ignored,
+                    ev,
+                    &mut pending,
+                    &mut stats,
+                ),
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => {
-                    emit_if_any(app, label, pending);
+                    flush_burst(app, label, pending, &stats);
+                    log::info!(target: T_WATCH, "watcher stopped (dropped): label={label}");
                     return;
                 }
             }
         }
 
-        emit_if_any(app, label, pending);
+        flush_burst(app, label, pending, &stats);
     }
 }
 
@@ -261,22 +321,41 @@ fn accumulate(
     is_ignored: &impl Fn(&Path) -> bool,
     ev: notify::Result<Event>,
     pending: &mut Option<Reason>,
+    stats: &mut BurstStats,
 ) {
     match ev {
         Ok(event) => {
+            for path in &event.paths {
+                stats.record_raw(path);
+                if is_kept(git_dir, is_ignored, path) {
+                    stats.kept += 1;
+                }
+            }
             if let Some(reason) = classify_paths_filtered(git_dir, is_ignored, &event.paths) {
                 *pending = Some(pending.map_or(reason, |cur| cur.max(reason)));
             }
         }
         Err(e) => {
+            log::warn!(target: T_WATCH, "watch error: label={label}: {e}");
             let _ = app.emit_to(label, "watch-error", format!("File watch error: {e}"));
         }
     }
 }
 
 /// Emit a single `repo-changed` to the owning window if the burst kept anything
-/// worth refreshing.
-fn emit_if_any(app: &AppHandle, label: &str, pending: Option<Reason>) {
+/// worth refreshing, and log the burst's diagnostics.
+///
+/// A burst of [`STORM_THRESHOLD`]+ raw events is warned about with sample paths
+/// even when nothing was kept — that pattern (thousands of ignored-path events)
+/// is itself the runaway signature we want to spot in the log.
+fn flush_burst(app: &AppHandle, label: &str, pending: Option<Reason>, stats: &BurstStats) {
+    if stats.raw_events >= STORM_THRESHOLD {
+        log::warn!(
+            target: T_WATCH,
+            "event storm: label={label} raw_events={} kept={} samples={:?}",
+            stats.raw_events, stats.kept, stats.samples
+        );
+    }
     if let Some(reason) = pending {
         let _ = app.emit_to(
             label,
@@ -285,6 +364,19 @@ fn emit_if_any(app: &AppHandle, label: &str, pending: Option<Reason>) {
                 reason: reason.as_str(),
             },
         );
+        if stats.kept > KEPT_INFO_THRESHOLD {
+            log::info!(
+                target: T_WATCH,
+                "repo-changed: label={label} reason={} raw_events={} kept={}",
+                reason.as_str(), stats.raw_events, stats.kept
+            );
+        } else {
+            log::debug!(
+                target: T_WATCH,
+                "repo-changed: label={label} reason={} raw_events={} kept={}",
+                reason.as_str(), stats.raw_events, stats.kept
+            );
+        }
     }
 }
 

@@ -31,6 +31,10 @@ The `gitrx` command-line launcher opens a repository from your terminal. Install
 
 Then `gitrx .` opens the current directory's repository — or any subdirectory of one; the app walks up to the enclosing working tree. It runs as a single instance with one window per repository: invoking `gitrx <path>` for an already-open repo focuses that window instead of spawning another.
 
+### Windows (experimental)
+
+The Windows build is a canary — it ships to surface breakage, not because it is supported. Known limitation: a repository containing a **WSL-created symlink** cannot be read by any Windows-native git tool (gitrx and its libgit2 core included). Such a link is stored as a Linux reparse point that Windows returns error 1920 for, so the whole status/diff walk aborts and gitrx surfaces a diagnostic toast naming the offending file. To work around it, either replace the link with a regular file, or recreate it as a Windows symlink (`mklink`, which needs Developer Mode enabled), then retry.
+
 ## Building from source
 
 Prerequisites: a stable Rust toolchain and [bun](https://bun.sh/).

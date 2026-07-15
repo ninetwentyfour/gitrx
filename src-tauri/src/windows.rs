@@ -24,6 +24,7 @@ use tauri_plugin_store::StoreExt;
 
 use crate::error::{AppError, AppResult};
 use crate::git::open_repository;
+use crate::logging::T_WINDOW;
 use crate::state::{AppState, WindowRepo};
 
 /// Label of the initial window (matches the single entry in `tauri.conf.json`).
@@ -218,6 +219,8 @@ pub fn open_or_focus(app: &AppHandle, workdir: PathBuf) -> AppResult<()> {
         )
     };
 
+    log::info!(target: T_WINDOW, "open_or_focus: decision={decision:?} repo={}", workdir.display());
+
     match decision {
         OpenDecision::Focus(label) => {
             if let Some(window) = app.get_webview_window(&label) {
@@ -251,8 +254,10 @@ pub fn open_or_focus(app: &AppHandle, workdir: PathBuf) -> AppResult<()> {
 /// only after the window exists (L2), then the binding is rolled back if the
 /// build fails.
 pub fn create_repo_window(app: &AppHandle, label: &str, workdir: PathBuf) -> AppResult<()> {
+    let repo_display = workdir.display().to_string();
     // H2: a live window already owns this label — rebind + focus, never rebuild.
     if let Some(window) = app.get_webview_window(label) {
+        log::info!(target: T_WINDOW, "window rebind+focus: label={label} repo={repo_display}");
         set_window_repo(app, label, workdir)?;
         persist_open_repos(app);
         let _ = window.unminimize();
@@ -279,11 +284,13 @@ pub fn create_repo_window(app: &AppHandle, label: &str, workdir: PathBuf) -> App
             if let Some(msg) = deferred_watch_error {
                 let _ = app.emit_to(label, "watch-error", msg);
             }
+            log::info!(target: T_WINDOW, "window created: label={label} repo={repo_display}");
             persist_open_repos(app);
             Ok(())
         }
         Err(e) => {
             remove_window(app, label);
+            log::warn!(target: T_WINDOW, "window create failed: label={label} repo={repo_display}: {e}");
             Err(AppError::git(format!("Failed to open window: {e}")))
         }
     }
@@ -339,6 +346,8 @@ pub fn persist_open_repos(app: &AppHandle) {
     if repos.is_empty() {
         return;
     }
+
+    log::debug!(target: T_WINDOW, "persist_open_repos: count={} repos={repos:?}", repos.len());
 
     if let Ok(store) = app.store(SETTINGS_STORE) {
         store.set(OPEN_REPOS_KEY, open_repos_to_json(&repos));

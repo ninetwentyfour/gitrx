@@ -12,6 +12,7 @@ export type AppErrorName =
   | "nothingStaged"
   | "emptyMessage"
   | "windowClosed"
+  | "unreadableWorkTreeFile"
   | "validation"
   | "git"
   | "io";

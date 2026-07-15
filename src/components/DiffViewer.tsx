@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAppStore } from "../store/useAppStore";
 import { readImage } from "../api/git";
+import { logDebug } from "../lib/log";
 import type { FileDiff } from "../types/ipc";
 import { useDiffHighlight } from "../highlight/useDiffHighlight";
 import { HunkView } from "./HunkView";
@@ -158,6 +159,10 @@ function BinaryNotice({ path, staged }: { path: string; staged: boolean }) {
     setImage({ status: "loading" });
     readImage(path, staged)
       .then(({ mimeType, base64 }) => {
+        // base64 length is the payload size crossing IPC — a preview memory signal.
+        logDebug(
+          `image preview: path=${path} staged=${staged} mime=${mimeType} b64_len=${base64.length}`,
+        );
         if (active) setImage({ status: "loaded", src: `data:${mimeType};base64,${base64}` });
       })
       .catch(() => {

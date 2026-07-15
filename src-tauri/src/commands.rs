@@ -10,7 +10,12 @@ use crate::git::{
     RepoStatus,
 };
 use crate::image::{read_image_data, ImageData, MAX_IMAGE_BYTES};
+use crate::logging::{Timer, T_CMD};
 use crate::state::AppState;
+
+/// A `get_diff` result carrying more than this many total diff lines is logged
+/// at `warn` — an oversized payload is a memory-pressure suspect.
+const DIFF_LINES_WARN: usize = 20_000;
 
 /// Result of a successful commit: the new commit's hex oid.
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +71,11 @@ pub async fn open_repo(
     crate::windows::set_window_repo(&app, window.label(), workdir)?;
     crate::windows::persist_open_repos(&app);
 
+    log::info!(
+        target: T_CMD,
+        "open_repo: label={} path={path:?} unstaged={} staged={}",
+        window.label(), status.unstaged.len(), status.staged.len()
+    );
     Ok(status)
 }
 
@@ -75,14 +85,26 @@ pub async fn get_status(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<RepoStatus> {
+    let timer = Timer::start();
     let path = window_repo_path(&state, &window)?;
     // libgit2 off the async runtime (M3).
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<RepoStatus> {
+    let status = tauri::async_runtime::spawn_blocking(move || -> AppResult<RepoStatus> {
         let repo = open_repository(&path)?;
         build_status(&repo)
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run status task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run status task: {e}")))?;
+    match &status {
+        Ok(s) => log::debug!(
+            target: T_CMD,
+            "get_status: label={} unstaged={} staged={} in {}ms",
+            window.label(), s.unstaged.len(), s.staged.len(), timer.ms()
+        ),
+        Err(e) => {
+            log::warn!(target: T_CMD, "get_status failed: label={} err={e} in {}ms", window.label(), timer.ms());
+        }
+    }
+    status
 }
 
 /// Return the diff of a single file in the calling window's repository.
@@ -105,13 +127,46 @@ pub async fn get_diff(
     // (`u32` floors at 0, so only the upper bound needs clamping.)
     let context_lines = context_lines.min(8);
 
+    let timer = Timer::start();
+    let log_path = path.clone();
     // libgit2 off the async runtime (M3).
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<FileDiff> {
+    let diff = tauri::async_runtime::spawn_blocking(move || -> AppResult<FileDiff> {
         let repo = open_repository(&repo_path)?;
         file_diff(&repo, &path, staged, context_lines)
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run diff task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run diff task: {e}")))?;
+    match &diff {
+        Ok(d) => {
+            let total_lines: usize = d.hunks.iter().map(|h| h.lines.len()).sum();
+            // An oversized diff is a memory suspect; surface it at warn.
+            if total_lines > DIFF_LINES_WARN {
+                log::warn!(
+                    target: T_CMD,
+                    "get_diff LARGE: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {}ms",
+                    d.hunks.len(), d.is_binary, d.is_lossy, timer.ms()
+                );
+            } else {
+                log::debug!(
+                    target: T_CMD,
+                    "get_diff: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {}ms",
+                    d.hunks.len(), d.is_binary, d.is_lossy, timer.ms()
+                );
+            }
+        }
+        Err(e) => {
+            log::warn!(target: T_CMD, "get_diff failed: path={log_path:?} staged={staged} err={e} in {}ms", timer.ms());
+        }
+    }
+    diff
+}
+
+/// Log the outcome of a whole-file mutating command uniformly.
+fn log_file_action(action: &str, path: &str, result: &AppResult<()>, ms: u128) {
+    match result {
+        Ok(()) => log::debug!(target: T_CMD, "{action}: path={path:?} ok in {ms}ms"),
+        Err(e) => log::warn!(target: T_CMD, "{action} failed: path={path:?} err={e} in {ms}ms"),
+    }
 }
 
 /// Stage the whole-file change for `path` in the calling window's repository.
@@ -125,13 +180,17 @@ pub async fn stage_file(
     let repo_path = window_repo_path(&state, &window)?;
     validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+    let timer = Timer::start();
+    let log_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::stage_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run stage task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run stage task: {e}")))?;
+    log_file_action("stage_file", &log_path, &result, timer.ms());
+    result
 }
 
 /// Unstage the whole-file change for `path`, resetting it back to HEAD.
@@ -145,13 +204,17 @@ pub async fn unstage_file(
     let repo_path = window_repo_path(&state, &window)?;
     validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+    let timer = Timer::start();
+    let log_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::unstage_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run unstage task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run unstage task: {e}")))?;
+    log_file_action("unstage_file", &log_path, &result, timer.ms());
+    result
 }
 
 /// Discard the working-tree changes for `path` (or delete it if untracked).
@@ -165,13 +228,17 @@ pub async fn discard_file(
     let repo_path = window_repo_path(&state, &window)?;
     validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+    let timer = Timer::start();
+    let log_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         let repo = open_repository(&repo_path)?;
         crate::git::discard_file(&repo, &path)?;
         Ok(())
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run discard task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run discard task: {e}")))?;
+    log_file_action("discard_file", &log_path, &result, timer.ms());
+    result
 }
 
 /// Which hunk command is validating its payload direction (see
@@ -307,11 +374,22 @@ async fn run_hunk(
     // `apply_hunk_verified` re-opens its own handle inside the closure.
     drop(repo);
 
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
+    let timer = Timer::start();
+    let log_path = payload.path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<()> {
         apply_hunk_verified(&workdir, &payload, target)
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run hunk-apply task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run hunk-apply task: {e}")))?;
+    match &result {
+        Ok(()) => {
+            log::debug!(target: T_CMD, "hunk {target:?}: path={log_path:?} ok in {}ms", timer.ms());
+        }
+        Err(e) => {
+            log::warn!(target: T_CMD, "hunk {target:?} failed: path={log_path:?} err={e} in {}ms", timer.ms());
+        }
+    }
+    result
 }
 
 /// Create a commit from the current index (or amend HEAD when `amend`).
@@ -327,15 +405,24 @@ pub async fn commit(
 ) -> AppResult<CommitResult> {
     let _guard = state.write_lock.lock().await;
     let repo_path = window_repo_path(&state, &window)?;
+    let timer = Timer::start();
     // libgit2 off the async runtime (M3); the write lock is held across the await
     // so the commit still serializes against other index mutations.
-    let oid = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
         let repo = open_repository(&repo_path)?;
         git_commit(&repo, &message, amend)
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run commit task: {e}")))??;
-    Ok(CommitResult { oid })
+    .map_err(|e| AppError::git(format!("Failed to run commit task: {e}")))?;
+    match &result {
+        Ok(oid) => {
+            log::info!(target: T_CMD, "commit: label={} amend={amend} oid={oid} in {}ms", window.label(), timer.ms());
+        }
+        Err(e) => {
+            log::warn!(target: T_CMD, "commit failed: label={} amend={amend} err={e} in {}ms", window.label(), timer.ms());
+        }
+    }
+    Ok(CommitResult { oid: result? })
 }
 
 /// Return HEAD commit's full message (used to prefill the amend editor), or an
@@ -371,12 +458,27 @@ pub async fn read_image(
     let repo_path = window_repo_path(&state, &window)?;
     validate_repo_relative_path(&repo_path, &path)?;
 
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<ImageData> {
+    let timer = Timer::start();
+    let log_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> AppResult<ImageData> {
         let repo = open_repository(&repo_path)?;
         read_image_data(&repo, &path, staged, MAX_IMAGE_BYTES)
     })
     .await
-    .map_err(|e| AppError::git(format!("Failed to run read_image task: {e}")))?
+    .map_err(|e| AppError::git(format!("Failed to run read_image task: {e}")))?;
+    match &result {
+        // `base64.len()` is the payload size crossing the IPC bridge (~4/3 the raw
+        // image bytes) — the memory-relevant number for a preview.
+        Ok(data) => log::debug!(
+            target: T_CMD,
+            "read_image: path={log_path:?} staged={staged} mime={} b64_len={} in {}ms",
+            data.mime_type, data.base64.len(), timer.ms()
+        ),
+        Err(e) => {
+            log::warn!(target: T_CMD, "read_image failed: path={log_path:?} staged={staged} err={e} in {}ms", timer.ms());
+        }
+    }
+    result
 }
 
 #[cfg(test)]

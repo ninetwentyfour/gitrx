@@ -10,6 +10,7 @@
     "core:window:allow-set-title",
     "opener:default",
     "dialog:default",
+    "log:default",
     "store:allow-load",
     "store:allow-get",
     "store:allow-set",

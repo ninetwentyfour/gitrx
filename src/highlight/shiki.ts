@@ -1,5 +1,6 @@
 import type { Highlighter, ThemedToken } from "shiki";
 import type { FileDiff } from "../types/ipc";
+import { logDebug } from "../lib/log";
 import { tokyowhale } from "./tokyowhale";
 
 /** The two themes the app can render diffs with. */
@@ -174,7 +175,12 @@ function toHlLine(tokens: ThemedToken[], defaultFg: string): HlToken[] {
  */
 export async function highlightDiff(diff: FileDiff, theme: DiffTheme): Promise<DiffTokens | null> {
   if (diff.isBinary || diff.hunks.length === 0) return null;
-  if (exceedsSizeGuards(diff)) return null;
+  if (exceedsSizeGuards(diff)) {
+    // Skipping tokenization for an oversized/pathological diff — noted because a
+    // guard hit correlates with the large payloads we're hunting for.
+    logDebug(`highlight skipped (size guard): path=${diff.path} hunks=${diff.hunks.length}`);
+    return null;
+  }
 
   const lang = resolveLang(diff.language);
   if (!lang) return null;

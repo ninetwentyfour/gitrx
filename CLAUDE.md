@@ -19,6 +19,7 @@ gitrx: a macOS git staging GUI (GitX replacement). Tauri 2.x — Rust backend (`
 - Release bundle: `bunx tauri build --bundles app` (NOT `bun run tauri build -- --bundles app` — the `--` forwards flags to cargo and breaks).
 - Full verification gate after any change: cargo build (zero warnings) + `cargo clippy --all-targets -- -D warnings` (zero warnings, now enforced by clippy — aggressive all/pedantic/nursery lints live in `src-tauri/Cargo.toml` `[lints]`) + cargo test + bun typecheck/lint/test/build/fmt:check, all green. `/verify-all` runs it.
 - Test fixture repo with every edge case: `scripts/make-fixture-repo.sh` (prints path).
+- Diagnostic logs (tauri-plugin-log): `~/Library/Logs/com.travisberry.rust-gitx/gitrx.log` (rotated; frontend + backend share it; RSS watchdog line `rss_mb=` every 60s is the correlation anchor). Raise verbosity with `RUST_LOG=debug`.
 
 ## Invariants (violating these corrupts user data)
 

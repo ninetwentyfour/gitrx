@@ -7,6 +7,7 @@ mod context_menu;
 pub mod error;
 pub mod git;
 mod image;
+mod logging;
 mod menu;
 mod state;
 mod watch;
@@ -36,6 +37,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             handle_second_instance(app, &argv, &cwd);
         }))
+        // Diagnostic logging is registered right after single-instance (which
+        // must stay first) so every subsequent plugin's activity can be logged.
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -62,6 +66,11 @@ pub fn run() {
             menu::set_windows_menu(app.handle());
 
             startup_restore(app.handle());
+
+            // Background RSS sampler — the anchor line for correlating memory
+            // growth against everything else in the log.
+            logging::spawn_memory_watchdog();
+            log::info!(target: logging::T_WINDOW, "gitrx started");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -102,6 +111,7 @@ pub fn run() {
             // Skip while quitting: every window closes on quit, and rewriting the
             // set as it drains would clobber the snapshot we want to restore.
             if !state.exiting.load(Ordering::SeqCst) && windows::remove_window(app_handle, &label) {
+                log::info!(target: logging::T_WINDOW, "window destroyed: label={label}");
                 windows::persist_open_repos(app_handle);
             }
         }
@@ -112,19 +122,22 @@ pub fn run() {
 /// A second `gitrx` invocation was intercepted. With a path arg → open-or-focus a
 /// window for that repo; without → just surface an existing window.
 fn handle_second_instance(app: &AppHandle, argv: &[String], cwd: &str) {
-    match windows::first_path_arg(argv) {
-        Some(arg) => match windows::resolve_cli_workdir(&arg, cwd) {
-            Ok(workdir) => {
-                if let Err(e) = windows::open_or_focus(app, workdir) {
-                    eprintln!("Failed to open forwarded repo '{arg}': {e}");
-                }
+    let Some(arg) = windows::first_path_arg(argv) else {
+        log::info!(target: logging::T_WINDOW, "single-instance forward: no path arg -> focus any window");
+        windows::focus_any_window(app);
+        return;
+    };
+    match windows::resolve_cli_workdir(&arg, cwd) {
+        Ok(workdir) => {
+            log::info!(target: logging::T_WINDOW, "single-instance forward: arg={arg:?} -> open_or_focus {}", workdir.display());
+            if let Err(e) = windows::open_or_focus(app, workdir) {
+                log::warn!(target: logging::T_WINDOW, "failed to open forwarded repo {arg:?}: {e}");
             }
-            Err(e) => {
-                eprintln!("Ignoring forwarded path '{arg}': {e}");
-                windows::focus_any_window(app);
-            }
-        },
-        None => windows::focus_any_window(app),
+        }
+        Err(e) => {
+            log::warn!(target: logging::T_WINDOW, "ignoring forwarded path {arg:?}: {e}");
+            windows::focus_any_window(app);
+        }
     }
 }
 
@@ -142,7 +155,7 @@ fn startup_restore(app: &AppHandle) {
     // The first instance runs in the launch cwd, so our own cwd is correct here.
     let cli_workdir = windows::first_path_arg(&argv).and_then(|arg| {
         windows::resolve_cli_workdir(&arg, &cwd)
-            .map_err(|e| eprintln!("Ignoring CLI path '{arg}': {e}"))
+            .map_err(|e| log::warn!(target: logging::T_WINDOW, "ignoring CLI path {arg:?}: {e}"))
             .ok()
     });
 
@@ -152,6 +165,7 @@ fn startup_restore(app: &AppHandle) {
 
     let mut main_bound = cli_workdir.is_some();
     if let Some(workdir) = cli_workdir {
+        log::info!(target: logging::T_WINDOW, "restore: binding CLI repo to main window: {}", workdir.display());
         opened.insert(windows::label_for_repo(&workdir));
         // The initial `main` window is built during `build()`, so it is live here;
         // ignore the closed-window guard's result (it cannot fail at startup).
@@ -166,11 +180,15 @@ fn startup_restore(app: &AppHandle) {
         if !opened.insert(label.clone()) {
             continue; // already opened this repo
         }
-        if !main_bound {
+        if main_bound {
+            log::info!(target: logging::T_WINDOW, "restore: opening window label={label} for {}", workdir.display());
+            if let Err(e) = windows::create_repo_window(app, &label, workdir) {
+                log::warn!(target: logging::T_WINDOW, "failed to restore repo window label={label}: {e}");
+            }
+        } else {
+            log::info!(target: logging::T_WINDOW, "restore: binding persisted repo to main window: {}", workdir.display());
             let _ = windows::set_window_repo(app, MAIN_LABEL, workdir);
             main_bound = true;
-        } else if let Err(e) = windows::create_repo_window(app, &label, workdir) {
-            eprintln!("Failed to restore repo window: {e}");
         }
     }
 

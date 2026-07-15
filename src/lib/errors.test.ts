@@ -27,6 +27,7 @@ describe("toAppError", () => {
       "nothingStaged",
       "emptyMessage",
       "windowClosed",
+      "unreadableWorkTreeFile",
       "validation",
       "git",
       "io",

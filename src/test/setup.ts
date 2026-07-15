@@ -1,6 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
+// `@tauri-apps/plugin-log` invokes the Tauri backend, which rejects in jsdom.
+// The diagnostic-log wrapper (src/lib/log.ts) is fire-and-forget, but mocking the
+// module keeps test output clean and mirrors the other Tauri plugin stubs below.
+vi.mock("@tauri-apps/plugin-log", () => ({
+  info: vi.fn().mockResolvedValue(undefined),
+  warn: vi.fn().mockResolvedValue(undefined),
+  debug: vi.fn().mockResolvedValue(undefined),
+}));
+
 // The Tauri window API has no backing window in jsdom. The store's
 // theme-application path calls `getCurrentWindow().setTheme(...)` and its
 // status-load path calls `getCurrentWindow().setTitle(...)`, so stub both

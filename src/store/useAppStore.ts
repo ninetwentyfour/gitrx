@@ -19,7 +19,14 @@ import {
 } from "../api/git";
 import { toHunkPayload } from "../lib/hunkPayload";
 import { isNoRepoError, toAppError } from "../lib/errors";
+import { logDebug, logWarn } from "../lib/log";
 import type { FileDiff, Hunk, RepoStatus } from "../types/ipc";
+
+/** Above this diff line count a getDiff response is a memory suspect (warned). */
+const DIFF_LINES_WARN = 5000;
+
+/** What triggered a status/diff refresh, logged so refresh loops are traceable. */
+type RefreshSource = "action" | "watcher" | "stale-drop";
 
 /**
  * A per-list multi-selection. All selected files live on the same side
@@ -58,6 +65,8 @@ type RefreshOpts = {
   /** When true, failures are logged instead of raising a toast (used by the
    * filesystem watcher, whose refreshes are background noise, not user actions). */
   silent?: boolean;
+  /** What triggered this refresh, for diagnostic logging. Defaults to `action`. */
+  source?: RefreshSource;
 };
 
 type AppState = {
@@ -310,8 +319,11 @@ export const useAppStore = create<AppState>((set, get) => {
     if (!pendingRefresh) return;
     if (get().busy || get().commitBusy || repoChangedInFlight) return;
     pendingRefresh = false;
-    await get().refreshStatus({ silent: true });
-    if (get().selection?.focusedPath != null) await get().refreshDiff({ silent: true });
+    logDebug("watcher: running deferred trailing refresh");
+    await get().refreshStatus({ silent: true, source: "watcher" });
+    if (get().selection?.focusedPath != null) {
+      await get().refreshDiff({ silent: true, source: "watcher" });
+    }
   }
 
   /**
@@ -323,17 +335,24 @@ export const useAppStore = create<AppState>((set, get) => {
    * it sets `pendingRefresh`, and the blocking site runs one trailing refresh when
    * it clears. These refreshes are `silent`: a background failure logs, not toasts.
    */
-  async function handleRepoChanged(): Promise<void> {
+  async function handleRepoChanged(reason: string): Promise<void> {
     const { busy, commitBusy } = get();
     if (busy || commitBusy || repoChangedInFlight) {
+      // Not dropped — deferred to a single trailing refresh once we're idle.
+      logDebug(
+        `watcher: repo-changed reason=${reason} deferred (busy=${busy} commitBusy=${commitBusy} inFlight=${repoChangedInFlight})`,
+      );
       pendingRefresh = true;
       return;
     }
+    logDebug(`watcher: repo-changed reason=${reason} processing`);
     repoChangedInFlight = true;
     try {
-      await get().refreshStatus({ silent: true });
+      await get().refreshStatus({ silent: true, source: "watcher" });
       // Re-read: refreshStatus may have dropped a now-vanished focused file.
-      if (get().selection?.focusedPath != null) await get().refreshDiff({ silent: true });
+      if (get().selection?.focusedPath != null) {
+        await get().refreshDiff({ silent: true, source: "watcher" });
+      }
     } finally {
       repoChangedInFlight = false;
     }
@@ -511,13 +530,17 @@ export const useAppStore = create<AppState>((set, get) => {
         // `repo-changed`/`watch-error` to its own label, so a change in one repo
         // refreshes only its window.
         const webview = getCurrentWebviewWindow();
-        const unlistenChanged = await webview.listen("repo-changed", () => {
-          void handleRepoChanged();
-        });
+        const unlistenChanged = await webview.listen<{ reason?: string }>(
+          "repo-changed",
+          (event) => {
+            void handleRepoChanged(event.payload?.reason ?? "unknown");
+          },
+        );
         const unlistenError = await webview.listen<string>("watch-error", (event) => {
           // Watcher errors are non-fatal noise; keep them out of the user-facing
           // toasts and just log them.
           console.warn("File watcher error:", event.payload);
+          logWarn(`watch-error: ${event.payload}`);
         });
         watcherUnlisteners = [unlistenChanged, unlistenError];
       })();
@@ -568,6 +591,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     refreshStatus: async (opts) => {
+      logDebug(`refreshStatus trigger source=${opts?.source ?? "action"}`);
       // A refresh may reshuffle/reconcile the selection out from under a pending
       // deferred collapse, so cancel it here.
       clearCollapseTimer();
@@ -718,11 +742,18 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ currentDiff: null, diffLoading: false });
         return;
       }
+      logDebug(`refreshDiff trigger source=${opts?.source ?? "action"} path=${focusedPath}`);
       const seq = ++diffSeq;
       set({ diffLoading: true });
       try {
         const diff = await getDiff(focusedPath, selection.staged, contextLines);
         if (seq !== diffSeq) return; // a newer request superseded this one
+        const totalLines = diff.hunks.reduce((n, h) => n + h.lines.length, 0);
+        if (totalLines > DIFF_LINES_WARN) {
+          logWarn(
+            `refreshDiff LARGE path=${focusedPath} lines=${totalLines} hunks=${diff.hunks.length} binary=${diff.isBinary}`,
+          );
+        }
         set({ currentDiff: diff, diffLoading: false });
       } catch (error) {
         if (seq !== diffSeq) return; // stale failure — ignore

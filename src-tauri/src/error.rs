@@ -63,6 +63,16 @@ pub enum AppError {
     #[error("{message}")]
     Validation { message: String },
 
+    /// A status/diff working-tree walk aborted because libgit2 (and every other
+    /// Windows-native git tool) could not read a file — in practice a WSL-created
+    /// symlink stored as a Linux reparse point (Windows error 1920). libgit2 fails
+    /// the *entire* walk on the first such entry, so the repo is otherwise
+    /// unusable; this variant replaces the cryptic raw error with a diagnosis and
+    /// actionable guidance. `message` carries the offending path plus the raw
+    /// libgit2 text (see [`AppError::unreadable_work_tree_file`]).
+    #[error("{message}")]
+    UnreadableWorkTreeFile { message: String },
+
     /// Catch-all for git failures: `git2::Error` conversions and `git` CLI
     /// invocation/apply failures, plus internal backend faults (poisoned locks,
     /// panicked blocking tasks) that are not clearly I/O.
@@ -75,12 +85,52 @@ pub enum AppError {
     Io { message: String },
 }
 
+/// Substring libgit2 emits when the OS rejects a working-tree path during a
+/// status/diff walk. It comes from a single site — `git_error_set(GIT_ERROR_OS,
+/// "invalid path for filesystem '%s'", path)` in libgit2's `util/fs_path.c`
+/// (`git_fs_path_set_error`, the `EINVAL`/`ENAMETOOLONG` branch) — so the class
+/// is always `Os` and the code `InvalidSpec`. The substring is the only
+/// path-bearing, libgit2-version-stable signal, so it is the authoritative
+/// check; the class/code merely corroborate it (see [`is_unreadable_work_tree_file`]).
+///
+/// On Windows a WSL-created symlink (a Linux reparse point) trips this: the OS
+/// returns error 1920 ("The file cannot be accessed by the system", appended to
+/// the message by libgit2's `GIT_ERROR_OS` formatting), no native process can
+/// read it, and the whole walk aborts on that first entry.
+const UNREADABLE_WORK_TREE_MARKER: &str = "invalid path for filesystem";
+
+/// Whether a libgit2 error message is the "OS could not read this working-tree
+/// path" failure class.
+///
+/// Matches [`UNREADABLE_WORK_TREE_MARKER`]. A pure predicate on the message text,
+/// so it is unit-testable without a live filesystem.
+#[must_use]
+pub fn is_unreadable_work_tree_file(message: &str) -> bool {
+    message.contains(UNREADABLE_WORK_TREE_MARKER)
+}
+
+/// Extract the first single-quoted path from a libgit2 message, e.g. the
+/// `C:/Users/.../guidelines.md` in `invalid path for filesystem '...': ...`.
+/// Returns `None` when the message carries no `'...'` pair.
+fn quoted_path(message: &str) -> Option<&str> {
+    let start = message.find('\'')? + 1;
+    let rest = message.get(start..)?;
+    let end = rest.find('\'')?;
+    rest.get(..end)
+}
+
 impl From<git2::Error> for AppError {
     fn from(err: git2::Error) -> Self {
+        let message = err.message();
+        // Classify the unreadable-worktree-file failure *before* the generic
+        // catch-all so the UI gets a diagnosis instead of the raw libgit2 text.
+        if is_unreadable_work_tree_file(message) {
+            return Self::unreadable_work_tree_file(message);
+        }
         // Preserve the historical "Git error: <libgit2 message>" text so the
         // string reaching the UI is byte-identical to the pre-migration Display.
         Self::Git {
-            message: format!("Git error: {}", err.message()),
+            message: format!("Git error: {message}"),
         }
     }
 }
@@ -155,6 +205,27 @@ impl AppError {
         }
     }
 
+    /// A working-tree file could not be read during a status/diff walk. Builds a
+    /// diagnosis from the raw libgit2 message: the offending path (extracted from
+    /// the quoted portion) plus actionable guidance, with the raw message appended
+    /// in parentheses for fidelity. Platform-neutral phrasing — the detection is
+    /// message-based, and macOS cannot produce this libgit2 error in practice.
+    #[must_use]
+    pub fn unreadable_work_tree_file(raw: &str) -> Self {
+        let subject = quoted_path(raw).map_or_else(
+            || "a file in this repository".to_string(),
+            |p| format!("'{p}'"),
+        );
+        Self::UnreadableWorkTreeFile {
+            message: format!(
+                "gitrx can't read {subject} — on Windows this usually means a WSL-created \
+                 symlink, which Windows programs (git included) cannot follow. Replace it with a \
+                 regular file, or recreate it as a Windows symlink (requires Developer Mode), then \
+                 retry. ({raw})"
+            ),
+        }
+    }
+
     /// A caller-supplied path/payload was rejected.
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation {
@@ -198,6 +269,10 @@ mod tests {
             (AppError::nothing_staged(), "nothingStaged"),
             (AppError::empty_message(), "emptyMessage"),
             (AppError::window_closed(), "windowClosed"),
+            (
+                AppError::unreadable_work_tree_file("invalid path for filesystem 'x'"),
+                "unreadableWorkTreeFile",
+            ),
             (AppError::validation("bad path"), "validation"),
             (AppError::git("boom"), "git"),
             (AppError::io("disk"), "io"),
@@ -223,5 +298,65 @@ mod tests {
         let io = AppError::from(std::io::Error::other("nope"));
         assert_eq!(io.to_string(), "IO error: nope");
         assert!(matches!(io, AppError::Io { .. }));
+    }
+
+    /// The pure predicate fires on the libgit2 marker substring and only on it.
+    #[test]
+    fn classifier_matches_only_the_filesystem_marker() {
+        assert!(is_unreadable_work_tree_file(
+            "invalid path for filesystem 'C:/x': The file cannot be accessed by the system."
+        ));
+        assert!(!is_unreadable_work_tree_file(
+            "Git error: some other failure"
+        ));
+    }
+
+    /// The offending path is lifted out of the quoted portion of the raw message.
+    #[test]
+    fn unreadable_variant_carries_path_and_raw_message() {
+        let raw = "invalid path for filesystem 'C:/Users/x/.ai/guidelines/guidelines.md': \
+             The file cannot be accessed by the system.";
+        let err = AppError::unreadable_work_tree_file(raw);
+        assert!(matches!(err, AppError::UnreadableWorkTreeFile { .. }));
+        let msg = err.to_string();
+        // Carries the extracted path, actionable guidance, and the raw text.
+        assert!(msg.contains("guidelines.md"));
+        assert!(msg.contains("WSL-created"));
+        assert!(msg.contains("Developer Mode"));
+        assert!(
+            msg.contains(raw),
+            "raw libgit2 message appended for fidelity"
+        );
+    }
+
+    /// A message with no quoted path still classifies, with a generic subject.
+    #[test]
+    fn unreadable_variant_without_quoted_path_falls_back() {
+        let err = AppError::unreadable_work_tree_file("invalid path for filesystem");
+        let msg = err.to_string();
+        assert!(msg.contains("a file in this repository"));
+    }
+
+    /// A constructed git2 error carrying the real class/code/message (as libgit2
+    /// raises it in `git_fs_path_set_error`) routes through `From` to the new
+    /// variant, not the generic `Git` catch-all.
+    #[test]
+    fn from_git2_error_classifies_unreadable_worktree_file() {
+        let raw = "invalid path for filesystem 'C:/repo/link': \
+                   The file cannot be accessed by the system.";
+        let git_err = git2::Error::new(git2::ErrorCode::InvalidSpec, git2::ErrorClass::Os, raw);
+        let app: AppError = git_err.into();
+        assert!(matches!(app, AppError::UnreadableWorkTreeFile { .. }));
+        assert!(app.to_string().contains("C:/repo/link"));
+    }
+
+    /// An unrelated git2 error still folds into the generic `Git` variant with the
+    /// historical prefix — the classifier must not over-match.
+    #[test]
+    fn from_git2_error_leaves_unrelated_errors_generic() {
+        let git_err = git2::Error::from_str("reference not found");
+        let app: AppError = git_err.into();
+        assert!(matches!(app, AppError::Git { .. }));
+        assert_eq!(app.to_string(), "Git error: reference not found");
     }
 }
