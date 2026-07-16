@@ -280,6 +280,70 @@ describe("useAppStore core", () => {
   });
 });
 
+describe("silent refresh identity preservation", () => {
+  // Watcher-driven (silent) refreshes that fetch an IDENTICAL payload must keep the
+  // existing store object reference: a new-but-deep-equal object would change
+  // identity and re-trigger React renders + the shiki re-highlight pipeline on
+  // every background git event across every open window (the memory-leak fix).
+
+  it("keeps the status reference when a silent refresh returns deep-equal data", async () => {
+    const original = makeStatus();
+    useAppStore.setState({ status: original, selection: null });
+    // A fresh, structurally-identical object from the backend.
+    mockGetStatus.mockResolvedValueOnce(makeStatus());
+
+    await useAppStore.getState().refreshStatus({ silent: true });
+
+    expect(useAppStore.getState().status).toBe(original);
+    expect(useAppStore.getState().loading).toBe(false);
+  });
+
+  it("replaces the status reference when a silent refresh returns changed data", async () => {
+    const original = makeStatus({ branch: "main" });
+    useAppStore.setState({ status: original, selection: null });
+    mockGetStatus.mockResolvedValueOnce(makeStatus({ branch: "feature" }));
+
+    await useAppStore.getState().refreshStatus({ silent: true });
+
+    expect(useAppStore.getState().status).not.toBe(original);
+    expect(useAppStore.getState().status?.branch).toBe("feature");
+  });
+
+  it("keeps the currentDiff reference when a silent refresh returns a deep-equal diff", async () => {
+    const original = makeDiff({ path: "a.txt", hunks: [] });
+    useAppStore.setState({ selection: sel("a.txt"), currentDiff: original });
+    mockGetDiff.mockResolvedValueOnce(makeDiff({ path: "a.txt", hunks: [] }));
+
+    await useAppStore.getState().refreshDiff({ silent: true });
+
+    expect(useAppStore.getState().currentDiff).toBe(original);
+    expect(useAppStore.getState().diffLoading).toBe(false);
+  });
+
+  it("replaces the currentDiff reference when a silent refresh returns a changed diff", async () => {
+    const original = makeDiff({ path: "a.txt", language: null });
+    useAppStore.setState({ selection: sel("a.txt"), currentDiff: original });
+    mockGetDiff.mockResolvedValueOnce(makeDiff({ path: "a.txt", language: "rust" }));
+
+    await useAppStore.getState().refreshDiff({ silent: true });
+
+    expect(useAppStore.getState().currentDiff).not.toBe(original);
+    expect(useAppStore.getState().currentDiff?.language).toBe("rust");
+  });
+
+  it("a non-silent status refresh always writes a fresh object even on equal data", async () => {
+    // The identity-preserving skip is scoped to silent (watcher) refreshes; a
+    // user-initiated refresh keeps its unconditional write path.
+    const original = makeStatus();
+    useAppStore.setState({ status: original, selection: null });
+    mockGetStatus.mockResolvedValueOnce(makeStatus());
+
+    await useAppStore.getState().refreshStatus();
+
+    expect(useAppStore.getState().status).not.toBe(original);
+  });
+});
+
 describe("theme", () => {
   it("setTheme('dark') sets data-theme and persists the choice", async () => {
     useAppStore.getState().setTheme("dark");

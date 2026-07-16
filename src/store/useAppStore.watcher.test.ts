@@ -40,6 +40,23 @@ const mockGetDiff = vi.mocked(getDiff);
 const mockStageFile = vi.mocked(stageFile);
 const mockListen = webviewMocks.listen;
 
+/**
+ * Override `document.visibilityState` (a read-only getter in jsdom) so the
+ * visibility-gated watcher paths can be exercised. Restored to "visible" after
+ * each test.
+ */
+function setVisibility(state: "visible" | "hidden"): void {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+}
+
+/** Fire the `visibilitychange` event the store's listener is wired to. */
+function fireVisibilityChange(): void {
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
 beforeEach(() => {
   useAppStore.setState({
     status: null,
@@ -53,10 +70,12 @@ beforeEach(() => {
     toasts: [],
   });
   useAppStore.getState().disposeWatcher();
+  setVisibility("visible");
 });
 
 afterEach(() => {
   useAppStore.getState().disposeWatcher();
+  setVisibility("visible");
   vi.clearAllMocks();
 });
 
@@ -176,6 +195,96 @@ describe("initWatcher", () => {
     await useAppStore.getState().initWatcher();
 
     handlers["repo-changed"]?.({ payload: { reason: "head" } });
+    await Promise.resolve();
+
+    expect(mockGetStatus).not.toHaveBeenCalled();
+  });
+
+  it("defers a repo-changed event while the window is hidden, then refreshes once on visible", async () => {
+    // A fully occluded/minimized window (visibilityState === "hidden") is the waste
+    // case: it must NOT refresh on every backend event. The change is deferred and
+    // a single trailing refresh runs when the window becomes visible again.
+    const handlers = wireListen();
+    await useAppStore.getState().initWatcher();
+    mockGetStatus.mockResolvedValue(makeStatus());
+
+    setVisibility("hidden");
+    handlers["repo-changed"]?.({ payload: { reason: "fs" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockGetStatus).not.toHaveBeenCalled();
+
+    // Bringing the window back to the foreground runs exactly one catch-up refresh.
+    setVisibility("visible");
+    fireVisibilityChange();
+    await vi.waitFor(() => expect(mockGetStatus).toHaveBeenCalledTimes(1));
+
+    // No second refresh piles up from the single deferred event.
+    await Promise.resolve();
+    expect(mockGetStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh on visibilitychange when nothing was deferred", async () => {
+    // Becoming visible with no pending change must be a no-op — not a spurious
+    // refresh every time the user tabs back to an already-current window.
+    const handlers = wireListen();
+    await useAppStore.getState().initWatcher();
+    mockGetStatus.mockResolvedValue(makeStatus());
+
+    setVisibility("visible");
+    fireVisibilityChange();
+    await Promise.resolve();
+
+    expect(mockGetStatus).not.toHaveBeenCalled();
+    expect(handlers["repo-changed"]).toBeTypeOf("function");
+  });
+
+  it("coalesces multiple hidden-window events into a single trailing refresh", async () => {
+    const handlers = wireListen();
+    await useAppStore.getState().initWatcher();
+    mockGetStatus.mockResolvedValue(makeStatus());
+
+    setVisibility("hidden");
+    handlers["repo-changed"]?.({ payload: { reason: "fs" } });
+    handlers["repo-changed"]?.({ payload: { reason: "index" } });
+    handlers["repo-changed"]?.({ payload: { reason: "head" } });
+    await Promise.resolve();
+    expect(mockGetStatus).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    fireVisibilityChange();
+    await vi.waitFor(() => expect(mockGetStatus).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(mockGetStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes immediately for a repo-changed event while the window is visible (regression)", async () => {
+    // The visibility gate must not regress the normal foreground path: a visible
+    // window still refreshes on the event itself, no visibilitychange required.
+    const handlers = wireListen();
+    await useAppStore.getState().initWatcher();
+    mockGetStatus.mockResolvedValue(makeStatus());
+
+    setVisibility("visible");
+    handlers["repo-changed"]?.({ payload: { reason: "fs" } });
+
+    await vi.waitFor(() => expect(mockGetStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it("disposeWatcher unwires the visibilitychange listener", async () => {
+    // The visibility listener shares the watcher's teardown; after disposal a
+    // visible transition must not run a deferred refresh.
+    const handlers = wireListen();
+    await useAppStore.getState().initWatcher();
+    mockGetStatus.mockResolvedValue(makeStatus());
+
+    setVisibility("hidden");
+    handlers["repo-changed"]?.({ payload: { reason: "fs" } });
+    await Promise.resolve();
+
+    useAppStore.getState().disposeWatcher();
+    setVisibility("visible");
+    fireVisibilityChange();
     await Promise.resolve();
 
     expect(mockGetStatus).not.toHaveBeenCalled();

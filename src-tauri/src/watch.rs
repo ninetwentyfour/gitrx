@@ -143,11 +143,10 @@ pub fn classify_paths(git_dir: &Path, paths: &[PathBuf]) -> Option<Reason> {
 /// Classify a burst of event paths, first dropping any working-tree path that
 /// git ignores (e.g. `src-tauri/target/**` churn during a build, `*.log`).
 ///
-/// `.git`-internal paths bypass the ignore check entirely: their curated
-/// handling lives in [`classify_paths`], and `is_path_ignored` would only
-/// confuse them (it reasons about working-tree ignore rules). So the filter
-/// keeps every path under `git_dir` and drops only workdir paths for which
-/// `is_ignored` returns `true`.
+/// `.git`-internal paths bypass the ignore check entirely: `is_path_ignored`
+/// reasons about working-tree ignore rules and would only confuse them. They are
+/// instead kept iff they are a real refresh trigger (see [`is_kept`]); workdir
+/// paths are dropped only when `is_ignored` returns `true`.
 ///
 /// This is the testable seam — the watcher tests drive it with a closure built
 /// from a real repo's `.gitignore`, no `FSEvents` required. [`classify_paths`]
@@ -165,13 +164,21 @@ fn classify_paths_filtered(
     classify_paths(git_dir, &kept)
 }
 
-/// Whether a raw event path survives the ignore filter: every `.git`-internal
-/// path is kept (its curated handling lives in [`classify_paths`]); a workdir
-/// path is kept only when git does not ignore it. Shared by
-/// [`classify_paths_filtered`] and the burst-stats counter so the "kept" count
-/// logged can never drift from what actually drives a refresh.
+/// Whether a raw event path actually drives a refresh — the single predicate
+/// shared by [`classify_paths_filtered`] (which paths to classify) and the
+/// burst-stats `kept` counter (how many to report), so the logged count can
+/// never drift from what refreshes.
+///
+/// A workdir path git ignores is dropped outright. Every other path is kept iff
+/// [`classify_one`] yields `Some`: this means a `.git`-internal path counts only
+/// when it is a real trigger (`index`/`HEAD`/`MERGE_HEAD`/`refs`, non-`.lock`) —
+/// pack-object, loose-object, log, and `FETCH_HEAD` churn no longer inflate the
+/// `kept` stat during a storm even though they are `.git`-internal.
 fn is_kept(git_dir: &Path, is_ignored: &impl Fn(&Path) -> bool, path: &Path) -> bool {
-    path.starts_with(git_dir) || !is_ignored(path)
+    if !path.starts_with(git_dir) && is_ignored(path) {
+        return false;
+    }
+    classify_one(git_dir, path).is_some()
 }
 
 /// Per-burst diagnostics accumulated across a debounced window, logged when the
@@ -503,6 +510,89 @@ mod tests {
         assert_eq!(
             classify_paths_filtered(&git_dir(), &is_ignored, &paths),
             Some(Reason::Fs)
+        );
+    }
+
+    // ---- `is_kept` / burst `kept` stat (the storm-count fix) ----
+
+    /// Count paths the shared predicate keeps — mirrors the per-event tally in
+    /// [`accumulate`], so it exercises exactly what the `kept=` stat reports.
+    fn kept_count(is_ignored: &impl Fn(&Path) -> bool, paths: &[PathBuf]) -> usize {
+        paths
+            .iter()
+            .filter(|p| is_kept(&git_dir(), is_ignored, p))
+            .count()
+    }
+
+    #[test]
+    fn pack_object_churn_counts_zero_kept() {
+        // A pure pack/loose-object burst is `.git`-internal but drives no refresh,
+        // so it must report kept=0 (previously it wrongly counted every path).
+        let never = |_: &Path| false;
+        let paths = vec![
+            PathBuf::from("/repo/.git/objects/pack/pack-abc.pack"),
+            PathBuf::from("/repo/.git/objects/pack/pack-abc.idx"),
+            PathBuf::from("/repo/.git/objects/ab/cdef0123"),
+            PathBuf::from("/repo/.git/logs/HEAD"),
+            PathBuf::from("/repo/.git/FETCH_HEAD"),
+        ];
+        assert_eq!(kept_count(&never, &paths), 0);
+        // And the classification stays None — filter and stat in lockstep.
+        assert_eq!(classify_paths_filtered(&git_dir(), &never, &paths), None);
+    }
+
+    #[test]
+    fn index_write_counts_one_kept() {
+        let never = |_: &Path| false;
+        let paths = vec![PathBuf::from("/repo/.git/index")];
+        assert_eq!(kept_count(&never, &paths), 1);
+    }
+
+    #[test]
+    fn lock_file_amid_pack_churn_counts_zero_kept() {
+        // `index.lock` is `.git`-internal but classify_one drops it → not kept.
+        let never = |_: &Path| false;
+        let paths = vec![
+            PathBuf::from("/repo/.git/index.lock"),
+            PathBuf::from("/repo/.git/objects/ab/cdef0123"),
+        ];
+        assert_eq!(kept_count(&never, &paths), 0);
+    }
+
+    #[test]
+    fn gitignored_workdir_paths_are_excluded_from_kept() {
+        let always = |_: &Path| true;
+        let paths = vec![
+            PathBuf::from("/repo/target/debug/foo.o"),
+            PathBuf::from("/repo/build.log"),
+        ];
+        assert_eq!(kept_count(&always, &paths), 0);
+    }
+
+    #[test]
+    fn non_ignored_workdir_paths_stay_kept() {
+        let never = |_: &Path| false;
+        let paths = vec![
+            PathBuf::from("/repo/src/main.rs"),
+            PathBuf::from("/repo/README.md"),
+        ];
+        assert_eq!(kept_count(&never, &paths), 2);
+    }
+
+    #[test]
+    fn kept_count_matches_classification_on_a_mixed_burst() {
+        // Ignore only `*.o`. Kept = index + real source; classification = Index.
+        let is_ignored = |p: &Path| p.extension().is_some_and(|e| e == "o");
+        let paths = vec![
+            PathBuf::from("/repo/target/debug/foo.o"), // ignored workdir  -> drop
+            PathBuf::from("/repo/.git/objects/ab/cd"), // object churn      -> drop
+            PathBuf::from("/repo/.git/index"),         // index write       -> keep
+            PathBuf::from("/repo/src/main.rs"),        // real source edit  -> keep
+        ];
+        assert_eq!(kept_count(&is_ignored, &paths), 2);
+        assert_eq!(
+            classify_paths_filtered(&git_dir(), &is_ignored, &paths),
+            Some(Reason::Index)
         );
     }
 

@@ -18,6 +18,7 @@ import {
   unstageHunk as apiUnstageHunk,
 } from "../api/git";
 import { toHunkPayload } from "../lib/hunkPayload";
+import { deepEqual } from "../lib/deepEqual";
 import { isNoRepoError, toAppError } from "../lib/errors";
 import { logDebug, logWarn } from "../lib/log";
 import type { FileDiff, Hunk, RepoStatus } from "../types/ipc";
@@ -241,6 +242,18 @@ function applyWindowTitle(status: RepoStatus | null): void {
   void getCurrentWindow().setTitle(title).catch(console.warn);
 }
 
+/**
+ * Whether this window is currently occluded/minimized. On macOS WKWebView
+ * `document.visibilityState` reflects NSWindow occlusion, so a side-by-side but
+ * unfocused window still reports `"visible"` (and keeps refreshing — correct),
+ * while a fully hidden or minimized window reports `"hidden"`. The watcher uses
+ * this to defer refreshes for hidden windows, which is where the wasted
+ * status/diff/shiki cycles pile up. Guarded for the jsdom/non-DOM environment.
+ */
+function isDocumentHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
 /** Read the persisted theme, or null if unset/unavailable. Never throws. */
 async function loadPersistedTheme(): Promise<Theme | null> {
   try {
@@ -319,10 +332,15 @@ export const useAppStore = create<AppState>((set, get) => {
    * Run the single trailing refresh a deferred `repo-changed` event asked for, but
    * only once no blocking condition holds. Clears `pendingRefresh` before running
    * so a fresh event during the refresh re-arms it rather than double-running.
+   *
+   * A hidden (occluded/minimized) window is also a blocking condition: the pending
+   * refresh stays armed and the `visibilitychange` listener re-invokes this once the
+   * window becomes visible again, so an occluded window catches up exactly once.
    */
   async function flushPendingRefresh(): Promise<void> {
     if (!pendingRefresh) return;
     if (get().busy || get().commitBusy || repoChangedInFlight) return;
+    if (isDocumentHidden()) return;
     pendingRefresh = false;
     logDebug("watcher: running deferred trailing refresh");
     await get().refreshStatus({ silent: true, source: "watcher" });
@@ -336,16 +354,20 @@ export const useAppStore = create<AppState>((set, get) => {
    * the diff when a file is selected. The backend already debounces and de-dupes.
    *
    * If a blocking condition holds (our own mutation is `busy`, a commit is in
-   * flight, or a prior watcher refresh is still running) the event is NOT dropped:
-   * it sets `pendingRefresh`, and the blocking site runs one trailing refresh when
-   * it clears. These refreshes are `silent`: a background failure logs, not toasts.
+   * flight, a prior watcher refresh is still running, or this window is hidden) the
+   * event is NOT dropped: it sets `pendingRefresh`, and the site that clears the
+   * condition (a mutation finishing, or `visibilitychange` -> visible) runs one
+   * trailing refresh. These refreshes are `silent`: a background failure logs, not toasts.
    */
   async function handleRepoChanged(reason: string): Promise<void> {
     const { busy, commitBusy } = get();
-    if (busy || commitBusy || repoChangedInFlight) {
-      // Not dropped — deferred to a single trailing refresh once we're idle.
+    const hidden = isDocumentHidden();
+    if (busy || commitBusy || repoChangedInFlight || hidden) {
+      // Not dropped — deferred to a single trailing refresh once we're idle and
+      // visible again. A hidden window is the common waste case: it stops
+      // refreshing entirely until the user brings it back to the foreground.
       logDebug(
-        `watcher: repo-changed reason=${reason} deferred (busy=${busy} commitBusy=${commitBusy} inFlight=${repoChangedInFlight})`,
+        `watcher: repo-changed reason=${reason} deferred (busy=${busy} commitBusy=${commitBusy} inFlight=${repoChangedInFlight} hidden=${hidden})`,
       );
       pendingRefresh = true;
       return;
@@ -547,7 +569,21 @@ export const useAppStore = create<AppState>((set, get) => {
           console.warn("File watcher error:", event.payload);
           logWarn(`watch-error: ${event.payload}`);
         });
-        watcherUnlisteners = [unlistenChanged, unlistenError];
+
+        // When this window becomes visible again, run the single trailing refresh a
+        // `repo-changed` event deferred while it was occluded/minimized. Wired
+        // through `watcherUnlisteners` so it shares the watcher's idempotent
+        // teardown (re-subscribing removes it first; StrictMode double-invoke and
+        // disposeWatcher both clean it up).
+        const onVisibilityChange = (): void => {
+          if (document.visibilityState === "visible") void flushPendingRefresh();
+        };
+        const unlistenVisibility = (): void => {
+          document.removeEventListener("visibilitychange", onVisibilityChange);
+        };
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        watcherUnlisteners = [unlistenChanged, unlistenError, unlistenVisibility];
       })();
 
       try {
@@ -609,6 +645,17 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const status = await getStatus();
         if (seq !== statusSeq) return; // a newer request superseded this one
+        // Silent (watcher-driven) refresh returning an identical payload: keep the
+        // existing `status` reference so nothing re-renders. When the status is
+        // deep-equal, both side effects are provable no-ops — the selection was
+        // already reconciled against this exact status (so `reconcileSelection`
+        // would reproduce the same object and never clear focus) and the window
+        // title derives purely from `repoName`/`branch` (unchanged). So a full
+        // early-return is safe; we only release the `loading` flag we set above.
+        if (opts?.silent && deepEqual(status, get().status)) {
+          set({ loading: false });
+          return;
+        }
         const { next, focusCleared } = reconcileSelection(status, get().selection);
         // If the focused file disappeared, drop its stale diff too and cancel any
         // in-flight fetch for it.
@@ -753,6 +800,14 @@ export const useAppStore = create<AppState>((set, get) => {
       try {
         const diff = await getDiff(focusedPath, selection.staged, contextLines);
         if (seq !== diffSeq) return; // a newer request superseded this one
+        // Silent (watcher-driven) refresh returning an identical diff: keep the
+        // existing `currentDiff` reference so `useDiffHighlight` does NOT re-run the
+        // shiki tokenizer (it re-tokenizes on `diff` identity change). The diffSeq
+        // stale-guard above already ran, so this only skips the redundant write.
+        if (opts?.silent && deepEqual(diff, get().currentDiff)) {
+          set({ diffLoading: false });
+          return;
+        }
         const totalLines = diff.hunks.reduce((n, h) => n + h.lines.length, 0);
         if (totalLines > DIFF_LINES_WARN) {
           logWarn(
