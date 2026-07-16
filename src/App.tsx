@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { useAppStore } from "./store/useAppStore";
+import { useFileListKeyboardNav } from "./hooks/useFileListKeyboardNav";
 import { HeaderBar } from "./components/HeaderBar";
 import { FileList } from "./components/FileList";
 import { CommitPanel } from "./components/CommitPanel";
@@ -68,6 +69,10 @@ function App() {
   const initialize = useAppStore((s) => s.initialize);
   const initWatcher = useAppStore((s) => s.initWatcher);
   const disposeWatcher = useAppStore((s) => s.disposeWatcher);
+
+  // Window-level arrow-key file-list navigation, mounted once here (see the hook's
+  // note on WKWebView's button-focus behavior — why it can't live on the list).
+  useFileListKeyboardNav();
 
   useEffect(() => {
     void initialize();

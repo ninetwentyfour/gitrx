@@ -4,6 +4,9 @@ import type { FileEntry, FileStatus } from "../types/ipc";
 type FileRowProps = {
   entry: FileEntry;
   selected: boolean;
+  /** Which list side this row lives on; emitted as `data-staged` so the global
+   * keyboard-nav hook can target the correct row (a path can exist on both sides). */
+  staged: boolean;
   /** Row clicked; the handler reads modifier keys off the event. */
   onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   /** Row double-clicked → stage/unstage the current selection. */
@@ -28,7 +31,14 @@ const STATUS_LABEL: Record<FileStatus, string> = {
  * double-clicking stages or unstages the selection; right-clicking opens the
  * native context menu.
  */
-export function FileRow({ entry, selected, onSelect, onActivate, onContextMenu }: FileRowProps) {
+export function FileRow({
+  entry,
+  selected,
+  staged,
+  onSelect,
+  onActivate,
+  onContextMenu,
+}: FileRowProps) {
   const fullPath =
     entry.status === "renamed" && entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path;
 
@@ -41,6 +51,8 @@ export function FileRow({ entry, selected, onSelect, onActivate, onContextMenu }
     <li className="file-row">
       <button
         type="button"
+        data-path={entry.path}
+        data-staged={String(staged)}
         className={`file-row__btn${untracked}${selected ? " is-selected" : ""}`}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}

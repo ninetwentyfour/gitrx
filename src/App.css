@@ -917,6 +917,14 @@ body {
   border-color: var(--color-accent);
 }
 
+/* Arrow-key navigation moves DOM focus together with the selection (roving
+   focus, see useFileListKeyboardNav), so the global magenta :focus-visible ring
+   would double up on the selection border — the selection styling IS the focus
+   indicator for rows. */
+.file-row__btn:focus-visible {
+  outline: none;
+}
+
 /* Untracked (new) files read as a de-emphasised group: the whole row is dimmed to
    the themed default opacity, returning to full on hover/selection so the
    selection styling stays fully legible. The path text is muted + italic. The "U"

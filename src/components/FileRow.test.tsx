@@ -22,6 +22,7 @@ function renderRow(entry: FileEntry, handlers: Partial<Parameters<typeof FileRow
     <FileRow
       entry={entry}
       selected={false}
+      staged={false}
       onSelect={() => {}}
       onActivate={() => {}}
       onContextMenu={() => {}}
@@ -46,6 +47,7 @@ describe("FileRow", () => {
       <FileRow
         entry={makeEntry({ path: "b.txt" })}
         selected
+        staged={false}
         onSelect={() => {}}
         onActivate={() => {}}
         onContextMenu={() => {}}
@@ -71,6 +73,7 @@ describe("FileRow", () => {
       <FileRow
         entry={makeEntry({ path: "u.txt", status: "untracked" })}
         selected={false}
+        staged={false}
         onSelect={() => {}}
         onActivate={() => {}}
         onContextMenu={() => {}}
@@ -83,6 +86,7 @@ describe("FileRow", () => {
       <FileRow
         entry={makeEntry({ path: "m.txt", status: "modified" })}
         selected={false}
+        staged={false}
         onSelect={() => {}}
         onActivate={() => {}}
         onContextMenu={() => {}}

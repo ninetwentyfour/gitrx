@@ -45,6 +45,13 @@ if (!globalThis.matchMedia) {
   })) as unknown as typeof globalThis.matchMedia;
 }
 
+// jsdom does not implement `scrollIntoView`; the window-level keyboard-nav hook
+// (useFileListKeyboardNav) calls it to keep the newly focused row visible after an
+// arrow-key navigation, so provide a no-op so that call does not throw in tests.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 // jsdom does not implement layout, so element sizes are 0. Stub the boxes the
 // panel library reads during resize calculations.
 if (!Element.prototype.getBoundingClientRect.name.includes("stub")) {

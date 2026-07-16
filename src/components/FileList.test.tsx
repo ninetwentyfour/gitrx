@@ -13,9 +13,11 @@
  * - Double-click stages/unstages the acted rows; right-click selects then opens
  *   the native menu, toasting a normalized failure message
  */
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FileList } from "./FileList";
+import { useFileListKeyboardNav } from "../hooks/useFileListKeyboardNav";
 import { useAppStore } from "../store/useAppStore";
 import { makeFileEntry, makeStatus as baseStatus } from "../test/factories";
 
@@ -249,6 +251,201 @@ describe("FileList interactions", () => {
       expect(useAppStore.getState().toasts.map((t) => t.message)).toContain("menu boom"),
     );
     expect(useAppStore.getState().toasts.map((t) => t.message)).not.toContain("Error: menu boom");
+  });
+});
+
+describe("FileList keyboard navigation", () => {
+  // Mounts the ONE window-level keyboard-nav listener (App's job in production)
+  // around whatever list(s) a test renders, so arrows are actually wired.
+  function WithNav({ children }: { children: ReactNode }) {
+    useFileListKeyboardNav();
+    return children;
+  }
+
+  // Dispatch an arrow keydown from document.body — deliberately reproducing the
+  // FIELD condition the old container handler died under: in WKWebView a mouse
+  // click never focuses the row <button>, so focus stays on <body> and the keydown
+  // fires there, never reaching the list. jsdom (unlike WebKit) DOES focus a button
+  // on click, so we blur it first to make <body> the genuine event target.
+  const arrowOnBody = (key: "ArrowDown" | "ArrowUp", shiftKey = false) => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key, shiftKey });
+  };
+
+  it("ArrowDown selects the next path (keydown on body, not the row)", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    arrowOnBody("ArrowDown");
+    expect(useAppStore.getState().selection).toMatchObject({
+      staged: false,
+      paths: ["b.txt"],
+      focusedPath: "b.txt",
+    });
+  });
+
+  it("ArrowUp selects the previous path", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/b\.txt/));
+    arrowOnBody("ArrowUp");
+    expect(useAppStore.getState().selection).toMatchObject({
+      staged: false,
+      paths: ["a.txt"],
+      focusedPath: "a.txt",
+    });
+  });
+
+  it("ArrowUp on the first row is a no-op (selection unchanged)", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    const before = useAppStore.getState().selection;
+    arrowOnBody("ArrowUp");
+    expect(useAppStore.getState().selection).toEqual(before);
+  });
+
+  it("ArrowDown on the last row is a no-op (selection unchanged)", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/c\.txt/));
+    const before = useAppStore.getState().selection;
+    arrowOnBody("ArrowDown");
+    expect(useAppStore.getState().selection).toEqual(before);
+  });
+
+  it("Shift+ArrowDown extends the selection and preserves the anchor", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    arrowOnBody("ArrowDown", true);
+    expect(useAppStore.getState().selection).toMatchObject({
+      paths: ["a.txt", "b.txt"],
+      anchorPath: "a.txt",
+      focusedPath: "b.txt",
+    });
+  });
+
+  it("moves roving DOM focus onto the newly selected row's button", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    arrowOnBody("ArrowDown");
+    expect(document.activeElement).toBe(rowBtn(/b\.txt/));
+  });
+
+  it("does nothing when there is no selection", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    arrowOnBody("ArrowDown");
+    expect(useAppStore.getState().selection).toBeNull();
+  });
+
+  it("navigates the STAGED list's order when the selection lives there (cross-list)", () => {
+    // The global hook must key off `selection.staged` and the staged order — never
+    // the unstaged list — so a selection on the staged side moves within it.
+    useAppStore.setState({
+      status: baseStatus({
+        unstaged: [makeFileEntry({ path: "a.txt", staged: false })],
+        staged: [
+          makeFileEntry({ path: "s1.txt", staged: true }),
+          makeFileEntry({ path: "s2.txt", staged: true }),
+        ],
+      }),
+      selection: null,
+    });
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/s1\.txt/));
+    arrowOnBody("ArrowDown");
+    expect(useAppStore.getState().selection).toMatchObject({
+      staged: true,
+      paths: ["s2.txt"],
+      focusedPath: "s2.txt",
+    });
+  });
+
+  it("ignores the arrow while a <textarea> is focused (commit message keeps its own nav)", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    const before = useAppStore.getState().selection;
+
+    const textarea = document.createElement("textarea");
+    document.body.append(textarea);
+    textarea.focus();
+    // Target is the textarea; the guard must let the keystroke through untouched.
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+    expect(useAppStore.getState().selection).toEqual(before);
+    textarea.remove();
+  });
+
+  it("ignores the arrow while an input[type=range] is focused (context slider steps)", () => {
+    render(
+      <WithNav>
+        <TwoLists />
+      </WithNav>,
+    );
+    fireEvent.click(rowBtn(/a\.txt/));
+    const before = useAppStore.getState().selection;
+
+    const range = document.createElement("input");
+    range.type = "range";
+    document.body.append(range);
+    range.focus();
+    fireEvent.keyDown(range, { key: "ArrowDown" });
+
+    expect(useAppStore.getState().selection).toEqual(before);
+    range.remove();
+  });
+
+  it("skips the presentational untracked divider when navigating", () => {
+    // Mixed tracked+untracked list: arrowing off the last tracked row lands on the
+    // first untracked row, since the divider is absent from the ordered paths.
+    const tracked = (path: string) => makeFileEntry({ path, staged: false, status: "modified" });
+    const untracked = (path: string) => makeFileEntry({ path, staged: false, status: "untracked" });
+    const mixed = [tracked("a.txt"), tracked("b.txt"), untracked("u1.txt"), untracked("u2.txt")];
+    useAppStore.setState({ status: baseStatus({ unstaged: mixed, staged: [] }), selection: null });
+    render(
+      <WithNav>
+        <FileList title="Unstaged" files={mixed} staged={false} />
+      </WithNav>,
+    );
+
+    fireEvent.click(rowBtn(/b\.txt/));
+    arrowOnBody("ArrowDown");
+    expect(useAppStore.getState().selection).toMatchObject({
+      paths: ["u1.txt"],
+      focusedPath: "u1.txt",
+    });
   });
 });
 

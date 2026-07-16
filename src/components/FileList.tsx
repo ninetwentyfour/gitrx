@@ -40,6 +40,11 @@ export function FileList({ title, files, staged }: FileListProps) {
   // cancel it (also covers a list switch that swaps this list out).
   useEffect(() => cancelPendingCollapse, [cancelPendingCollapse]);
 
+  // ArrowUp/ArrowDown navigation is handled globally by `useFileListKeyboardNav`
+  // (mounted once in App), NOT here: WKWebView leaves focus on document.body after
+  // a row click, so a keydown never reaches this list. See that hook for the full
+  // root-cause note.
+
   const handleSelect = (path: string) => (event: MouseEvent<HTMLButtonElement>) => {
     // A double-click fires onClick twice before onDblClick; ignore the extra
     // clicks so a range/toggle is not recomputed mid-gesture.
@@ -94,6 +99,7 @@ export function FileList({ title, files, staged }: FileListProps) {
               <FileRow
                 entry={entry}
                 selected={selectedPaths.includes(entry.path)}
+                staged={staged}
                 onSelect={handleSelect(entry.path)}
                 onActivate={handleActivate(entry.path)}
                 onContextMenu={handleContextMenu(entry.path)}

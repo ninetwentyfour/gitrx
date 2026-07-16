@@ -141,8 +141,13 @@ export function toMessage(err: unknown): string {
   return toAppError(err).message;
 }
 
-/** The paths of the given list, in display order. */
-function orderedPaths(status: RepoStatus | null, staged: boolean): string[] {
+/**
+ * The paths of the given list, in display order. Exported so the window-level
+ * keyboard-nav hook ({@link file://../hooks/useFileListKeyboardNav.ts}) derives a
+ * list's arrow-navigation order from the exact same source the list renders from —
+ * they cannot diverge.
+ */
+export function orderedPaths(status: RepoStatus | null, staged: boolean): string[] {
   if (!status) return [];
   return (staged ? status.staged : status.unstaged).map((f) => f.path);
 }
