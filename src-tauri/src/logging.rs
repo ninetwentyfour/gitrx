@@ -104,6 +104,12 @@ const RSS_ERROR_MB: u64 = 4096; // 4 GB
 /// How many top `WebKit` consumers to name on the watchdog line.
 const WEBKIT_TOP_LIMIT: usize = 3;
 
+/// How many top system-wide RSS consumers (any process) to name on the line.
+const TOP_RSS_LIMIT: usize = 3;
+/// Cap the rendered length of a process name in `top_rss=`; macOS `comm` is a
+/// full executable path and some are absurdly long, which would bloat the line.
+const TOP_RSS_NAME_MAX: usize = 32;
+
 /// `comm` substrings identifying the out-of-process `WebKit` helpers that host the
 /// webview's JS/DOM heaps — the actual runaway last time (~10 GB) while our own
 /// RSS sat at ~40 MB. Matched system-wide because on macOS these helpers are XPC
@@ -115,6 +121,12 @@ const WEBKIT_MARKERS: [&str; 3] = ["WebKit.WebContent", "WebKit.GPU", "WebKit.Ne
 /// Parse the stdout of `ps -o rss= -p <pid>` (resident set size in KiB on macOS)
 /// into whole mebibytes. Returns `None` on empty/garbage output. Shared by the
 /// per-line parser below so the KiB→MiB conversion has a single tested spelling.
+///
+/// The `ps` parsing chain is only *called* from the `#[cfg(unix)]` sampler (plus
+/// tests), so it must be gated `any(unix, test)` or a Windows build dies on
+/// `dead_code` under `-D warnings` — exactly what broke the v0.2.7/v0.2.8
+/// Windows release canary.
+#[cfg(any(unix, test))]
 fn parse_ps_rss_kib_to_mb(output: &str) -> Option<u64> {
     let kib: u64 = output.trim().parse().ok()?;
     Some(kib / 1024)
@@ -132,7 +144,8 @@ struct ProcSample {
 /// Parse one `ps -axo pid=,ppid=,rss=,comm=` line. The first three whitespace
 /// tokens are `pid`, `ppid`, `rss` (KiB); everything after is the command, which
 /// may itself contain spaces, so it is re-joined. Returns `None` for blank or
-/// malformed lines.
+/// malformed lines. Gated `any(unix, test)`: see [`parse_ps_rss_kib_to_mb`].
+#[cfg(any(unix, test))]
 fn parse_ps_proc_line(line: &str) -> Option<ProcSample> {
     let mut parts = line.split_whitespace();
     let pid: u32 = parts.next()?.parse().ok()?;
@@ -152,6 +165,8 @@ fn parse_ps_proc_line(line: &str) -> Option<ProcSample> {
 
 /// Parse the full `ps -axo pid=,ppid=,rss=,comm=` table, skipping unparseable
 /// lines. Pure so the whole watchdog aggregation is unit-testable without `ps`.
+/// Gated `any(unix, test)`: see [`parse_ps_rss_kib_to_mb`].
+#[cfg(any(unix, test))]
 fn parse_ps_processes(output: &str) -> Vec<ProcSample> {
     output.lines().filter_map(parse_ps_proc_line).collect()
 }
@@ -192,6 +207,36 @@ fn webkit_top_consumers(procs: &[ProcSample], limit: usize) -> Vec<(u32, u64)> {
     hits
 }
 
+/// Reduce a `ps` `comm` value to a short, greppable label: the trailing path
+/// component (macOS reports a full executable path like
+/// `/Applications/Zed.app/Contents/MacOS/zed`), truncated to
+/// [`TOP_RSS_NAME_MAX`] chars so one pathological name can't blow up the line.
+///
+/// Char-based truncation keeps the result valid UTF-8 without slicing a
+/// multibyte boundary. Referenced from cross-platform [`top_rss_consumers`], so
+/// no `cfg` gate is needed (unlike the `ps`-parsing helpers).
+fn short_proc_name(comm: &str) -> String {
+    let base = comm.rsplit('/').find(|s| !s.is_empty()).unwrap_or(comm);
+    base.chars().take(TOP_RSS_NAME_MAX).collect()
+}
+
+/// The `limit` largest processes system-wide (ANY process) by RSS, as
+/// `(name, pid, rss_mb)`, sorted descending by RSS with pid as a stable
+/// tie-break. Names are reduced to a short basename via [`short_proc_name`].
+///
+/// Purely diagnostic: this list is deliberately NOT fed into [`watchdog_peak_mb`]
+/// / severity, because other apps legitimately use lots of RAM and must not
+/// escalate gitrx's own line to warn/error.
+fn top_rss_consumers(procs: &[ProcSample], limit: usize) -> Vec<(String, u32, u64)> {
+    let mut all: Vec<(String, u32, u64)> = procs
+        .iter()
+        .map(|p| (short_proc_name(&p.comm), p.pid, p.rss_mb))
+        .collect();
+    all.sort_unstable_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    all.truncate(limit);
+    all
+}
+
 /// The aggregated watchdog reading for one tick.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WatchdogSample {
@@ -201,6 +246,9 @@ struct WatchdogSample {
     child_mb: u64,
     /// Top `WebKit` helpers system-wide, `(pid, rss_mb)`, descending.
     webkit_top: Vec<(u32, u64)>,
+    /// Top processes system-wide by RSS, `(name, pid, rss_mb)`, descending.
+    /// Purely diagnostic — never influences severity (see [`watchdog_peak_mb`]).
+    top_rss: Vec<(String, u32, u64)>,
 }
 
 /// Reduce a parsed `ps` table to the tick's [`WatchdogSample`] for `own_pid`.
@@ -213,12 +261,16 @@ fn build_watchdog_sample(procs: &[ProcSample], own_pid: u32) -> WatchdogSample {
         own_mb,
         child_mb: sum_descendant_rss_mb(procs, own_pid),
         webkit_top: webkit_top_consumers(procs, WEBKIT_TOP_LIMIT),
+        top_rss: top_rss_consumers(procs, TOP_RSS_LIMIT),
     }
 }
 
 /// The largest single reading across own RSS, summed descendants, and the biggest
 /// `WebKit` helper — this drives severity so a webview runaway (invisible in own
 /// RSS) still escalates the line to warn/error.
+///
+/// Note: `top_rss` is intentionally excluded — it names other apps' memory use,
+/// which must never escalate gitrx's own severity.
 fn watchdog_peak_mb(sample: &WatchdogSample) -> u64 {
     let webkit_max = sample.webkit_top.first().map_or(0, |&(_, mb)| mb);
     sample.own_mb.max(sample.child_mb).max(webkit_max)
@@ -234,14 +286,26 @@ fn format_webkit_top(top: &[(u32, u64)]) -> String {
     format!("[{inner}]")
 }
 
+/// Render the system-wide top list as `[name:pid:mb, ...]` (empty list → `[]`).
+fn format_top_rss(top: &[(String, u32, u64)]) -> String {
+    let inner = top
+        .iter()
+        .map(|(name, pid, mb)| format!("{name}:{pid}:{mb}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{inner}]")
+}
+
 /// Format the single periodic watchdog line. `rss_mb=` stays the leading key so
-/// the grep playbook anchored on it keeps working.
+/// the grep playbook anchored on it keeps working. Field order is fixed:
+/// `rss_mb= child_rss_mb= webkit_top= top_rss=`.
 fn format_watchdog_line(sample: &WatchdogSample) -> String {
     format!(
-        "rss_mb={} child_rss_mb={} webkit_top={}",
+        "rss_mb={} child_rss_mb={} webkit_top={} top_rss={}",
         sample.own_mb,
         sample.child_mb,
         format_webkit_top(&sample.webkit_top),
+        format_top_rss(&sample.top_rss),
     )
 }
 
@@ -308,6 +372,32 @@ pub fn spawn_memory_watchdog() {
 // ---------------------------------------------------------------------------
 // Command timing
 // ---------------------------------------------------------------------------
+
+/// A command slower than this (ms) logs its completion at `warn` — a user-visible
+/// stall (staging lag, a huge diff) worth surfacing at the default level.
+const SLOW_CMD_WARN_MS: u128 = 1000;
+/// A command slower than this (ms) logs its completion at `info` — noticeable but
+/// not alarming. Below it, completion stays at `debug` as before.
+const SLOW_CMD_INFO_MS: u128 = 250;
+
+/// Pick the log level a *successful* command's completion line should use, promoted
+/// by how long it took: `>= 1000ms → Warn`, `>= 250ms → Info`, else `Debug`.
+///
+/// One shared spelling so every command's timing line escalates identically. Kept
+/// separate from the log call itself (which owns the message shape) so the callers
+/// stay one-liners: `log::log!(target: T_CMD, cmd_timing_level(ms), "…in {ms}ms")`.
+/// The lag that motivated this was invisible because these lines sat at `debug`
+/// under the default `Info` level.
+#[must_use]
+pub const fn cmd_timing_level(ms: u128) -> log::Level {
+    if ms >= SLOW_CMD_WARN_MS {
+        log::Level::Warn
+    } else if ms >= SLOW_CMD_INFO_MS {
+        log::Level::Info
+    } else {
+        log::Level::Debug
+    }
+}
 
 /// A minimal stopwatch for command instrumentation: `Timer::start()` at entry,
 /// `.ms()` when logging the outcome. Exists so the command layer has one shared
@@ -495,6 +585,15 @@ not a real row
         assert_eq!(sample.own_mb, 40);
         assert_eq!(sample.child_mb, 15);
         assert_eq!(sample.webkit_top, vec![(300, 812)]);
+        // Top-RSS is system-wide, largest first, independent of the WebKit scan.
+        assert_eq!(
+            sample.top_rss,
+            vec![
+                ("com.apple.WebKit.WebContent".to_string(), 300, 812),
+                ("gitrx".to_string(), 100, 40),
+                ("helper".to_string(), 200, 15),
+            ]
+        );
     }
 
     #[test]
@@ -504,6 +603,65 @@ not a real row
         assert_eq!(sample.own_mb, 0);
         assert_eq!(sample.child_mb, 0);
         assert!(sample.webkit_top.is_empty());
+        assert_eq!(sample.top_rss, vec![("helper".to_string(), 200, 15)]);
+    }
+
+    #[test]
+    fn short_proc_name_renders_basename_and_truncates() {
+        // A macOS full-path comm reduces to its basename.
+        assert_eq!(
+            short_proc_name("/Applications/Zed.app/Contents/MacOS/zed"),
+            "zed"
+        );
+        // A bare command with no slash is returned as-is.
+        assert_eq!(short_proc_name("launchd"), "launchd");
+        // A trailing slash is ignored (find skips the empty final segment).
+        assert_eq!(short_proc_name("/usr/bin/"), "bin");
+        // An absurdly long basename is capped at TOP_RSS_NAME_MAX chars.
+        let long = "a".repeat(100);
+        assert_eq!(short_proc_name(&long).chars().count(), TOP_RSS_NAME_MAX);
+    }
+
+    #[test]
+    fn top_rss_picks_largest_processes_any_kind_capped() {
+        let procs = vec![
+            proc(1, 1, 10, "launchd"),
+            proc(2, 1, 9000, "/Applications/Chrome.app/Contents/MacOS/Chrome"),
+            proc(3, 1, 40, "gitrx"),
+            proc(
+                4,
+                1,
+                5000,
+                "/System/.../XPCServices/com.apple.WebKit.WebContent",
+            ),
+            proc(5, 1, 3000, "/usr/bin/mds_stores"),
+        ];
+        // Descending by rss, capped at the limit; names are basenames.
+        assert_eq!(
+            top_rss_consumers(&procs, TOP_RSS_LIMIT),
+            vec![
+                ("Chrome".to_string(), 2, 9000),
+                ("com.apple.WebKit.WebContent".to_string(), 4, 5000),
+                ("mds_stores".to_string(), 5, 3000),
+            ]
+        );
+    }
+
+    #[test]
+    fn top_rss_ties_break_on_pid() {
+        let procs = vec![
+            proc(30, 1, 100, "b"),
+            proc(10, 1, 100, "a"),
+            proc(20, 1, 100, "c"),
+        ];
+        assert_eq!(
+            top_rss_consumers(&procs, 3),
+            vec![
+                ("a".to_string(), 10, 100),
+                ("c".to_string(), 20, 100),
+                ("b".to_string(), 30, 100),
+            ]
+        );
     }
 
     #[test]
@@ -513,6 +671,7 @@ not a real row
             own_mb: 40,
             child_mb: 0,
             webkit_top: vec![(300, 9000), (301, 20)],
+            top_rss: vec![],
         };
         assert_eq!(watchdog_peak_mb(&sample), 9000);
 
@@ -521,6 +680,7 @@ not a real row
             own_mb: 40,
             child_mb: 5000,
             webkit_top: vec![],
+            top_rss: vec![],
         };
         assert_eq!(watchdog_peak_mb(&sample), 5000);
     }
@@ -531,8 +691,22 @@ not a real row
             own_mb: 40,
             child_mb: 0,
             webkit_top: vec![(300, RSS_ERROR_MB + 1)],
+            top_rss: vec![],
         };
         assert!(watchdog_peak_mb(&sample) >= RSS_ERROR_MB);
+    }
+
+    #[test]
+    fn peak_ignores_top_rss_so_other_apps_never_escalate() {
+        // A giant unrelated process (in top_rss but not WebKit/ours) must not
+        // drive severity: peak stays at our own tiny footprint.
+        let sample = WatchdogSample {
+            own_mb: 40,
+            child_mb: 0,
+            webkit_top: vec![],
+            top_rss: vec![("Chrome".to_string(), 999, RSS_ERROR_MB * 4)],
+        };
+        assert_eq!(watchdog_peak_mb(&sample), 40);
     }
 
     #[test]
@@ -545,15 +719,32 @@ not a real row
     }
 
     #[test]
+    fn format_top_rss_renders_name_pid_mb() {
+        assert_eq!(format_top_rss(&[]), "[]");
+        assert_eq!(
+            format_top_rss(&[
+                ("zed".to_string(), 1234, 812),
+                ("Chrome".to_string(), 5678, 210)
+            ]),
+            "[zed:1234:812, Chrome:5678:210]"
+        );
+    }
+
+    #[test]
     fn format_line_keeps_rss_mb_as_leading_key() {
         let sample = WatchdogSample {
             own_mb: 41,
             child_mb: 0,
             webkit_top: vec![(1234, 812), (5678, 210)],
+            top_rss: vec![
+                ("zed".to_string(), 4321, 3000),
+                ("gitrx".to_string(), 41, 41),
+            ],
         };
         assert_eq!(
             format_watchdog_line(&sample),
-            "rss_mb=41 child_rss_mb=0 webkit_top=[1234:812, 5678:210]"
+            "rss_mb=41 child_rss_mb=0 webkit_top=[1234:812, 5678:210] \
+             top_rss=[zed:4321:3000, gitrx:41:41]"
         );
     }
 
@@ -562,5 +753,18 @@ not a real row
         let t = Timer::start();
         // Just exercising the API: elapsed is always representable and monotone.
         let _ms: u128 = t.ms();
+    }
+
+    #[test]
+    fn cmd_timing_level_promotes_by_duration() {
+        // Fast commands stay at debug (unchanged from before).
+        assert_eq!(cmd_timing_level(0), log::Level::Debug);
+        assert_eq!(cmd_timing_level(SLOW_CMD_INFO_MS - 1), log::Level::Debug);
+        // The info threshold is inclusive.
+        assert_eq!(cmd_timing_level(SLOW_CMD_INFO_MS), log::Level::Info);
+        assert_eq!(cmd_timing_level(SLOW_CMD_WARN_MS - 1), log::Level::Info);
+        // The warn threshold is inclusive; a multi-second stall escalates to warn.
+        assert_eq!(cmd_timing_level(SLOW_CMD_WARN_MS), log::Level::Warn);
+        assert_eq!(cmd_timing_level(5000), log::Level::Warn);
     }
 }

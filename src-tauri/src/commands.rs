@@ -10,7 +10,7 @@ use crate::git::{
     RepoStatus,
 };
 use crate::image::{read_image_data, ImageData, MAX_IMAGE_BYTES};
-use crate::logging::{Timer, T_CMD};
+use crate::logging::{cmd_timing_level, Timer, T_CMD};
 use crate::state::AppState;
 
 /// A `get_diff` result carrying more than this many total diff lines is logged
@@ -94,14 +94,16 @@ pub async fn get_status(
     })
     .await
     .map_err(|e| AppError::git(format!("Failed to run status task: {e}")))?;
+    let ms = timer.ms();
     match &status {
-        Ok(s) => log::debug!(
+        Ok(s) => log::log!(
             target: T_CMD,
-            "get_status: label={} unstaged={} staged={} in {}ms",
-            window.label(), s.unstaged.len(), s.staged.len(), timer.ms()
+            cmd_timing_level(ms),
+            "get_status: label={} unstaged={} staged={} in {ms}ms",
+            window.label(), s.unstaged.len(), s.staged.len()
         ),
         Err(e) => {
-            log::warn!(target: T_CMD, "get_status failed: label={} err={e} in {}ms", window.label(), timer.ms());
+            log::warn!(target: T_CMD, "get_status failed: label={} err={e} in {ms}ms", window.label());
         }
     }
     status
@@ -136,35 +138,42 @@ pub async fn get_diff(
     })
     .await
     .map_err(|e| AppError::git(format!("Failed to run diff task: {e}")))?;
+    let ms = timer.ms();
     match &diff {
         Ok(d) => {
             let total_lines: usize = d.hunks.iter().map(|h| h.lines.len()).sum();
-            // An oversized diff is a memory suspect; surface it at warn.
+            // An oversized diff is a memory suspect; surface it at warn regardless
+            // of how quickly it was produced.
             if total_lines > DIFF_LINES_WARN {
                 log::warn!(
                     target: T_CMD,
-                    "get_diff LARGE: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {}ms",
-                    d.hunks.len(), d.is_binary, d.is_lossy, timer.ms()
+                    "get_diff LARGE: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {ms}ms",
+                    d.hunks.len(), d.is_binary, d.is_lossy
                 );
             } else {
-                log::debug!(
+                log::log!(
                     target: T_CMD,
-                    "get_diff: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {}ms",
-                    d.hunks.len(), d.is_binary, d.is_lossy, timer.ms()
+                    cmd_timing_level(ms),
+                    "get_diff: path={log_path:?} staged={staged} ctx={context_lines} hunks={} lines={total_lines} binary={} lossy={} in {ms}ms",
+                    d.hunks.len(), d.is_binary, d.is_lossy
                 );
             }
         }
         Err(e) => {
-            log::warn!(target: T_CMD, "get_diff failed: path={log_path:?} staged={staged} err={e} in {}ms", timer.ms());
+            log::warn!(target: T_CMD, "get_diff failed: path={log_path:?} staged={staged} err={e} in {ms}ms");
         }
     }
     diff
 }
 
-/// Log the outcome of a whole-file mutating command uniformly.
+/// Log the outcome of a whole-file mutating command uniformly. A successful call
+/// is promoted out of `debug` by its duration (see [`cmd_timing_level`]) so a slow
+/// stage/unstage/discard is visible at the default level.
 fn log_file_action(action: &str, path: &str, result: &AppResult<()>, ms: u128) {
     match result {
-        Ok(()) => log::debug!(target: T_CMD, "{action}: path={path:?} ok in {ms}ms"),
+        Ok(()) => {
+            log::log!(target: T_CMD, cmd_timing_level(ms), "{action}: path={path:?} ok in {ms}ms");
+        }
         Err(e) => log::warn!(target: T_CMD, "{action} failed: path={path:?} err={e} in {ms}ms"),
     }
 }
@@ -381,12 +390,13 @@ async fn run_hunk(
     })
     .await
     .map_err(|e| AppError::git(format!("Failed to run hunk-apply task: {e}")))?;
+    let ms = timer.ms();
     match &result {
         Ok(()) => {
-            log::debug!(target: T_CMD, "hunk {target:?}: path={log_path:?} ok in {}ms", timer.ms());
+            log::log!(target: T_CMD, cmd_timing_level(ms), "hunk {target:?}: path={log_path:?} ok in {ms}ms");
         }
         Err(e) => {
-            log::warn!(target: T_CMD, "hunk {target:?} failed: path={log_path:?} err={e} in {}ms", timer.ms());
+            log::warn!(target: T_CMD, "hunk {target:?} failed: path={log_path:?} err={e} in {ms}ms");
         }
     }
     result
@@ -466,16 +476,18 @@ pub async fn read_image(
     })
     .await
     .map_err(|e| AppError::git(format!("Failed to run read_image task: {e}")))?;
+    let ms = timer.ms();
     match &result {
         // `base64.len()` is the payload size crossing the IPC bridge (~4/3 the raw
         // image bytes) — the memory-relevant number for a preview.
-        Ok(data) => log::debug!(
+        Ok(data) => log::log!(
             target: T_CMD,
-            "read_image: path={log_path:?} staged={staged} mime={} b64_len={} in {}ms",
-            data.mime_type, data.base64.len(), timer.ms()
+            cmd_timing_level(ms),
+            "read_image: path={log_path:?} staged={staged} mime={} b64_len={} in {ms}ms",
+            data.mime_type, data.base64.len()
         ),
         Err(e) => {
-            log::warn!(target: T_CMD, "read_image failed: path={log_path:?} staged={staged} err={e} in {}ms", timer.ms());
+            log::warn!(target: T_CMD, "read_image failed: path={log_path:?} staged={staged} err={e} in {ms}ms");
         }
     }
     result
